@@ -4,17 +4,29 @@ pub fn lexer_rules() -> LexerRules {
     santiago::lexer_rules!(
         "DEFAULT" | "INT" = pattern r"[0-9]+";
         "DEFAULT" | "IDENTIFIER" = pattern r"[a-zA-Z_][a-zA-Z_0-9]*";
+        "DEFAULT" | "KEYWORD" = pattern r"[a-zA-Z_][a-zA-Z_0-9]*:";
+        "DEFAULT" | "LOCAL" = pattern r":[a-zA-Z_][a-zA-Z_0-9]*";
+        "DEFAULT" | "COMMENT" = pattern "\"[^\"]*\"";
         "DEFAULT" | "+" = string "+";
         "DEFAULT" | "-" = string "-";
         "DEFAULT" | "*" = string "*";
         "DEFAULT" | "/" = string "/";
         "DEFAULT" | "^" = string "^";
         "DEFAULT" | "." = string ".";
+        "DEFAULT" | "[" = string "[";
+        "DEFAULT" | "]" = string "]";
+        "DEFAULT" | "(" = string "(";
+        "DEFAULT" | ")" = string ")";
+        "DEFAULT" | "|" = string "|";        
+        "DEFAULT" | "." = string ".";        
+        "DEFAULT" | "ASSIGN" = string ":=";
+        "DEFAULT" | "BINARY" = pattern r"[=+\-*/]+";
+        "DEFAULT" | "CHAR" = pattern r"\$.";
         "DEFAULT" | "WS" = pattern r"\s" => |lexer| lexer.skip();
     )
 }
 
-use santiago::grammar::Associativity;
+// use santiago::grammar::Associativity;
 use santiago::grammar::Grammar;
 
 #[derive(Debug)]
