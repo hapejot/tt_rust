@@ -11,9 +11,9 @@ use std::{
 
 use chrono::Local;
 
-use tt_rust::controls::{Label, TextContent, TextInput, Form, Location, Widget};
 use futures::{future::FutureExt, select, StreamExt};
 use futures_timer::Delay;
+use tt_rust::controls::{Form, Label, Location, TextContent, TextInput, Widget};
 
 use crossterm::{
     cursor::{position, MoveTo},
@@ -26,11 +26,10 @@ use crossterm::{
     QueueableCommand, Result,
 };
 
-
 /// Prints a rectangular box.
 /// # let printer = Printer::new((6,4), &t, &*b);
 /// printer.print_box((0, 0), (6, 4), false);
-/// 
+///
 pub fn print_box(w: &mut Box<dyn Write>) -> Result<()> {
     w.write("\r\n".as_bytes())?;
     w.write("┌".as_bytes())?;
@@ -57,7 +56,6 @@ pub fn print_box(w: &mut Box<dyn Write>) -> Result<()> {
     Ok(())
 }
 
-
 fn goto_cursor_location(w: &mut Box<dyn Write>, l: &Location) {
     let _ = queue!(w, MoveTo(l.y, l.x));
     w.flush().expect("flush");
@@ -66,17 +64,16 @@ fn goto_cursor_location(w: &mut Box<dyn Write>, l: &Location) {
 async fn event_loop(w: &mut Box<dyn Write>, d: &AppData) {
     let key_c = Event::Key(KeyCode::Char('c').into());
     let mut reader = EventStream::new();
-    let _ = w.queue(Clear(ClearType::All))
-        .expect("clear")
-        .flush();
+    let _ = w.queue(Clear(ClearType::All)).expect("clear").flush();
     let label1 = Label::new("[Label]");
     let clock_l = Label::new("[clock]");
     let input = TextInput::new(20);
     let mut form = Form::new();
-    let active = Box::new(input);
-    form.add(Box::new(label1));
-    form.add(Box::new(clock_l));
-    form.add(active);
+    let active = input.clone();
+    let clock = clock_l.clone();
+    form.add(label1);
+    form.add(clock_l);
+    form.add(input);
 
     w.queue(SetTitle("Hello 1")).expect("2");
 
@@ -97,7 +94,7 @@ async fn event_loop(w: &mut Box<dyn Write>, d: &AppData) {
             maybe_event = event => {
                 match maybe_event {
                     Some(Ok(event)) => {
-                        if let Some(unhandled_event) = active.as_ref().handle_event(event){
+                        if let Some(unhandled_event) = active.handle_event(event){
                             if let Event::Mouse( _kind ) = unhandled_event {
                                 // println!("mouse event: {:?}", _kind);
                             }
