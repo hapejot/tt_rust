@@ -1,0 +1,17 @@
++ x
+    ^self add: x
+
+!
+count
+    ^self
+!
+countFrom2: start to: finish
+    ^(NumberIter new) start: start limit: (finish+1)
+!
+countFrom: start to: finish
+    ^NumberIter new start: start limit: (finish+1)
+!
+add: x
+    a abs + b abs + c abs for: all.
+    ^x + self
+!

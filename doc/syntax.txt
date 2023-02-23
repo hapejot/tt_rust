@@ -1,0 +1,223 @@
+<<Smalltalk program>> ::= <<program element>>+ <<initialization ordering>> 
+<<program element>> ::= <<class definition>> | <<global definition>> | <<pool definition>> | <<program initializer definition>>
+
+<<class definition>>::= <<class name>> [<<superclass name>>] 
+                         [<<instance state>>] 
+                         [<<class instance variable names>>] 
+                         [<<class variable names>>] 
+                         [<<imported pool names>>] 
+                         [<<instance methods>>] 
+                         [<<class methods>>] 
+                         [<<class initializer>>] 
+<<class name>> ::= identifier 
+<<superclass name>> ::= identifier 
+<<instance state>> := <<byte indexable>> | [<<object indexable>>] <<instance variables names>> 
+<<instance variables names>> ::= identifier* 
+<<class instance variable names>> ::= identifier* 
+<<class variable names>> ::= identifier* 
+<<imported pool names>> ::= identifier* 
+<<instance methods>> ::= <method definition>*
+<<class methods>> ::= <method definition>* 
+<<class initializer>> ::= <initializer definition>
+
+
+<<global definition>> ::= [<<constant designator>>] <<global name>> [<<variable initializer>>] 
+<<global name>> ::= identifier 
+<<variable initializer>> ::= <initializer definition>
+
+
+<<pool definition>> ::= <<pool name>> <<pool variable definition>>* 
+<<pool name>> ::= identifier 
+<<pool variable definition>> ::= [<<constant designator>> <<pool variable name>> [<<variable initializer>>] 
+<<pool variable name>> ::= identifier 
+
+
+<<program initializer definition>> ::= <initializer definition>
+
+
+<method definition> ::= <message pattern> [<temporaries> ] [<statements>] 
+<message pattern> ::= <unary pattern> | <binary pattern> | <keyword pattern> 
+<unary pattern> ::= unarySelector 
+<binary pattern> ::= binarySelector <method argument> 
+<keyword pattern> ::= (keyword <method argument>)+ 
+<temporaries> ::= '|' <temporary variable list> '|' 
+<temporary variable list> ::= identifier*
+
+
+<initializer definition> ::= [<temporaries>] [<statements>] 
+
+
+
+<block constructor> ::= '[' <block body> ']' 
+<block body> ::= [<block argument>* '|'] [<temporaries>] [<statements>] 
+<block argument> ::= ':' identifier 
+
+
+
+<statements> ::= (<return statement> ['.'] ) | (<expression> ['.' [<statements>]]) 
+
+
+<return statement> ::= returnOperator <expression> 
+
+
+<expression> ::= <assignment> | <basic expression> 
+<assignment> ::= <assignment target> assignmentOperator <expression> 
+<basic expression> ::= <primary> [<messages> <cascaded messages>] 
+<assignment target> := identifier 
+<primary> ::= identifier | <literal> | <block constructor> | ( '(' <expression> ')' ) 
+
+
+
+<messages> ::= (<unary message>+ <binary message>* [<keyword message>] ) 
+             | (<binary message>+ [<keyword message>] ) 
+             | <keyword message> 
+<unary message> ::= unarySelector 
+<binary message> ::= binarySelector <binary argument> 
+<binary argument> ::= <primary> <unary message>* 
+<keyword message> ::= (keyword <keyword argument> )+ 
+<keyword argument> ::= <primary> <unary message>* <binary message>* 
+<cascaded messages> ::= (';' <messages>)*
+
+
+<literal> ::= <number literal> | <string literal> | <character literal> | <symbol literal> | <selector literal> | <array literal> 
+
+
+<number literal> ::= ['-'] <number> 
+<number> ::= integer | float | scaledDecimal 
+
+
+
+<character literal> ::= quotedCharacter
+
+
+<string literal> ::= quotedString 
+
+
+<symbol literal> ::= hashedString 
+
+
+<selector literal> ::= quotedSelector 
+
+
+<array literal> ::= '#(' <array element>* ')' 
+<array element> ::= <literal> | identifier 
+
+
+character ::= "Any character in the implementation-defined character set" 
+whitespace ::= "Any non-printing character interpreted as white space including spaces, tabs, and line breaks" 
+digit ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' 
+ 
+uppercaseAlphabetic ::= 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S'| 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z' 
+lowercaseAlphabetic ::= 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'I' | 'j' | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' 
+nonCaseLetter ::= '_' 
+letter ::= uppercaseAlphabetic | lowercaseAlphabetic | nonCaseLetter | "implementation defined letters"
+
+
+commentDelimiter ::= '"' 
+nonCommentDelimiter::= "any character that is not a commentDelimiter " 
+comment := commentDelimiter nonCommentDelimiter * commentDelimiter 
+
+
+
+identifier ::= letter (letter | digit)*
+
+
+keyword ::= identifier ':' 
+
+
+ 
+binaryCharacter ::= '!' | '%' | '&'' | '*' | '+' | ','' | '/' | '<' | '=' | '>' | '?' | '@' | '\' | '~' | '|' | '-'
+binarySelector ::= binaryCharacter+
+returnOperator ::= '^'
+assignmentOperator ::= ':=' 
+
+integer ::= decimalInteger | radixInteger 
+decimalInteger ::= digits 
+digits ::= digit+ 
+radixInteger ::= radixSpecifier 'r' radixDigits 
+radixSpecifier := digits 
+radixDigits ::= (digit | uppercaseAlphabetic)+ 
+
+
+float ::= mantissa [exponentLetter exponent] 
+mantissa ::= digits '.' digits 
+exponent ::= ['-']decimalInteger 
+exponentLetter ::= 'e' | 'd' | 'q' 
+
+
+scaledDecimal ::= scaledMantissa 's' [fractionalDigits] 
+scaledMantissa ::= decimalInteger | mantissa 
+fractionalDigits ::= decimalInteger
+
+
+quotedCharacter ::= '$' character
+
+
+quotedString ::= stringDelimiter stringBody stringDelimiter 
+stringBody ::= (nonStringDelimiter | (stringDelimiter stringDelimiter)*)
+stringDelimiter ::= ''' "a single quote"
+nonStringDelimiter ::= "any character except stringDelimiter" 
+
+
+hashedString ::= '#' quotedString
+
+
+
+quotedSelector ::= '#' (unarySelector | binarySelector | keywordSelector) 
+keywordSelector ::= keyword+
+
+
+
+separator ::= (whitespace | comment)* 
+
+
+<interchangeFile> ::= <interchangeVersionIdentifier> ( <interchangeUnit> ) + 
+<elementSeparator> ::= '!' 
+<interchangeUnit> ::= <interchangeElement> <annotation>* 
+<interchangeElement> ::= <classDefinition> | <classInitialization> | <globalDefinition> | <globalValueInitialization> | <poolDefinition> | <poolVariableDefinition> | <poolValueInitialization> | <methodDefinition> | <classMethodDefinition> | <programInitialization> | comment <elementSeparator>
+<interchangeVersionIdentifier> ::= 'Smalltalk' 'interchangeVersion:' <versionId> <elementSeparator> 
+<versionId> ::= quotedString 
+
+
+<classDefinition> ::= 'Class' 'named:' <classNameString> 'superclass:' <superclassNameString> 'indexedInstanceVariables:' <indexableInstVarType> 'instanceVariableNames:' <instanceVariableNames> 'classVariableNames:' <classVariableList> 'sharedPools:' <poolList> 'classInstanceVariableNames:'<classInstVariableList> <elementSeparator> 
+<classNameString> ::= stringDelimiter <className> stringDelimiter 
+<superclassNameString> ::= stringDelimiter <className> stringDelimiter 
+<className> ::= identifier 
+<indexableInstVarType> ::= hashedString 
+<instanceVariableNames> ::= <identifierList> 
+<classVariableList> ::= <identifierList> 
+<classInstVariableList> ::= <identifierList> 
+<poolList> ::= <identifierList> 
+<identifierList> ::= stringDelimiter identifier* stringDelimiter 
+<methodDefinition> ::= <className> 'method' <elementSeparator> <method definition> <elementSeparator> 
+<classMethodDefinition> ::= <className> 'classMethod' <elementSeparator> <method definition> <elementSeparator> 
+<classInitialization> ::= <className> 'initializer' <elementSeparator> <initializer definition> <elementSeparator> 
+<globalDefinition> ::= <globalVariableDefinition> | <globalConstantDefinition> 
+<globalVariableDefinition> ::= 'Global' 'variable:' <globalNameString> <elementSeparator> 
+<globalConstantDefinition> ::= 'Global' 'constant:' <globalNameString> <elementSeparator> 
+<globalValueInitialization> ::= <globalName> 'initializer' <elementSeparator> <variableInitializer> <elementSeparator> 
+<globalNameString> ::= stringDelimiter <globalName> stringDelimiter 
+<globalName> ::= identifier 
+<variableInitializer> ::= <initializer definition> 
+
+
+<poolDefinition> ::= 'Pool' 'named:' <poolNameString> <elementSeparator> 
+<poolVariableDefinition> ::= <poolValueDefinition> | <poolConstantDefinition> 
+<poolValueDefinition> ::= <poolName> 'variable:' <poolVariableNameString> <elementSeparator> 
+<poolConstantDefinition> ::= <poolName> 'constant:' <poolVariableNameString> <elementSeparator> 
+<poolValueInitialization> ::= <poolName> 'initializerFor:' <poolVariableNameString> <elementSeparator> <variableInitializer> <elementSeparator> 
+<poolNameString> ::= stringDelimiter <poolName> stringDelimiter 
+<poolVariableNameString> ::= stringDelimiter <poolVariableName> stringDelimiter 
+<poolName> ::= identifier 
+<poolVariableName> ::= identifier
+
+
+
+<programInitialization> ::= 'Global' 'initializer' <elementSeparator> <programInitializer> <elementSeparator> 
+<programInitializer> ::= <initializer definition>
+
+
+
+<annotation> ::= 'Annotation' 'key:' quotedString 'value:' quotedString <elementSeparator> 
+
+
