@@ -1,3 +1,0 @@
-
-ZCORE_ERRORS
-Z1 Liefersperre sollte geprüft werden, ob sie zu lange hängt. 
