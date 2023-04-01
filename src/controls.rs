@@ -1,6 +1,7 @@
 use std::{
     io::Write,
-    sync::{Arc, Mutex}, rc::Rc,
+    rc::Rc,
+    sync::{Arc, Mutex},
 };
 
 use crossterm::{
@@ -13,6 +14,22 @@ use crossterm::{
     },
     QueueableCommand, Result,
 };
+
+
+
+pub enum Value {
+    Literal(&'static str)
+}
+
+
+impl Value {
+    fn newLiteral(x: &'static str) -> Value{
+        Value::Literal(x)
+    }
+
+    fn new
+}
+
 
 #[derive(Clone)]
 pub struct TextContent {
@@ -36,21 +53,33 @@ pub trait Widget {
     fn handle_event(&self, e: Event) -> Option<Event>;
 }
 
+pub struct Size {
+    pub width: u16,
+    pub height: u16,
+}
+
 pub struct Location {
     pub x: u16,
     pub y: u16,
+}
+
+pub struct Rect {
+    pub location: Location,
+    pub size: Size,
 }
 
 pub struct Label {
     pub txt: TextContent,
     pub location: Location,
 }
+
 impl Label {
-    pub fn new<T: Into<String>>(arg: T) -> Label {
-        Label {
+    pub fn new<T: Into<String>>(arg: T) -> WidgetRef {
+        let l = Label {
             txt: TextContent::new(arg),
             location: Location { x: 0, y: 0 },
-        }
+        };
+        WidgetRef { w: Rc::new(l) }
     }
     pub fn content(&self) -> TextContent {
         self.txt.clone()
@@ -75,12 +104,13 @@ pub struct TextInput {
     pub width: u16,
 }
 impl TextInput {
-    pub fn new(arg: u16) -> TextInput {
-        TextInput {
+    pub fn new(arg: u16) -> WidgetRef {
+        let t = TextInput {
             txt: TextContent::empty(),
             location: Location { x: 0, y: 0 },
             width: arg,
-        }
+        };
+        WidgetRef { w: Rc::new(t) }
     }
 }
 
@@ -140,3 +170,9 @@ impl Widget for WidgetRef {
     }
 }
 
+impl WidgetRef {
+    // fn check(&self) -> () {
+    //     let x = self.w.as_ref();
+    //     let y:Label = x.downcast_ref();
+    // }
+}
