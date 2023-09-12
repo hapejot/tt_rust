@@ -7,13 +7,12 @@ edition = "2021"
 
 [dependencies]
 santiago = "*"
-sqlite = "*"
 odbc-api = "*"
 # anyhow = "*"
 csv = "*"
-
 tokio = { version = "*", features=["full"] }
 crossterm = { version = "*", features=["event-stream"] }
 futures = "*"
 futures-timer = "*"
 chrono = "*"
+rusqlite = { version = "0.29.0", features = ["bundled", "modern_sqlite"] }

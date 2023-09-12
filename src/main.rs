@@ -13,7 +13,7 @@ fn main() -> Result<(), ()> {
 
     match santiago::lexer::lex(&lexing_rules, &stdin) {
         Ok(lexemes) => {
-            print_lexemes(&lexemes);
+            // print_lexemes(&lexemes);
 
             match santiago::parser::parse(&grammar, &lexemes) {
                 Ok(parse_trees) => {

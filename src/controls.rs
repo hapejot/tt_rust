@@ -26,8 +26,6 @@ impl Value {
     fn newLiteral(x: &'static str) -> Value{
         Value::Literal(x)
     }
-
-    fn new
 }
 
 
