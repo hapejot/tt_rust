@@ -16,3 +16,5 @@ futures = "*"
 futures-timer = "*"
 chrono = "*"
 rusqlite = { version = "0.29.0", features = ["bundled", "modern_sqlite"] }
+serde = { version = "1.0.188", features = ["serde_derive"] }
+error = "0.1.9"

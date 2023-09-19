@@ -1,21 +1,23 @@
-use santiago::parser::ParseError;
+use std::{rc::Rc, io::stdin};
+
+use santiago::{parser::{ParseError, Tree, parse}, lexer::{Lexeme, LexerError, lex}};
 use tt_rust::parser::{lexer_rules, grammar, AST};
+use std::io::Read;
 
 
 fn main() -> Result<(), ()> {
-    use std::io::Read;
 
     let lexing_rules = lexer_rules();
     let grammar = grammar();
 
-    let mut stdin = String::new();
-    std::io::stdin().read_to_string(&mut stdin).unwrap();
+    let mut input_string = String::new();
+    stdin().read_to_string(&mut input_string).unwrap();
 
-    match santiago::lexer::lex(&lexing_rules, &stdin) {
+    match lex(&lexing_rules, &input_string) {
         Ok(lexemes) => {
             // print_lexemes(&lexemes);
 
-            match santiago::parser::parse(&grammar, &lexemes) {
+            match parse(&grammar, &lexemes) {
                 Ok(parse_trees) => {
                     handle_parse_tree(parse_trees)
                 }
@@ -30,7 +32,7 @@ fn main() -> Result<(), ()> {
     }
 }
 
-fn handle_lex_error(error: santiago::lexer::LexerError) -> Result<(), ()> {
+fn handle_lex_error(error: LexerError) -> Result<(), ()> {
     println!("Lexing Error:");
     println!("{}",error);
     Err(())
@@ -42,7 +44,7 @@ fn handle_error(error: ParseError<AST>) -> Result<(), ()> {
     Err(())
 }
 
-fn handle_parse_tree(parse_trees: Vec<std::rc::Rc<santiago::parser::Tree<tt_rust::parser::AST>>>) -> Result<(), ()> {
+fn handle_parse_tree(parse_trees: Vec<Rc<Tree<AST>>>) -> Result<(), ()> {
     println!("Parse Trees:");
     for tree in &parse_trees {
         println!("{tree}");
@@ -55,7 +57,7 @@ fn handle_parse_tree(parse_trees: Vec<std::rc::Rc<santiago::parser::Tree<tt_rust
     Ok(())
 }
 
-fn print_lexemes(lexemes: &Vec<std::rc::Rc<santiago::lexer::Lexeme>>) {
+fn print_lexemes(lexemes: &Vec<Rc<Lexeme>>) {
     println!("Lexemes:");
     for lexeme in lexemes {
         println!("  {lexeme}");

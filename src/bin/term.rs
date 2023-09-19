@@ -61,7 +61,7 @@ fn goto_cursor_location(w: &mut Box<dyn Write>, l: &Location) {
     w.flush().expect("flush");
 }
 
-async fn event_loop(w: &mut Box<dyn Write>, d: &AppData) {
+async fn event_loop(w: &mut Box<dyn Write>, _d: &AppData) {
     let key_c = Event::Key(KeyCode::Char('c').into());
     let mut reader = EventStream::new();
     let _ = w.queue(Clear(ClearType::All)).expect("clear").flush();
@@ -70,7 +70,7 @@ async fn event_loop(w: &mut Box<dyn Write>, d: &AppData) {
     let input = TextInput::new(20);
     let mut form = Form::new();
     let active = input.clone();
-    let clock = clock_l.clone();
+    let _clock = clock_l.clone();
     form.add(label1);
     form.add(clock_l);
     form.add(input);
@@ -78,7 +78,7 @@ async fn event_loop(w: &mut Box<dyn Write>, d: &AppData) {
     w.queue(SetTitle("Hello 1")).expect("2");
 
     w.flush().unwrap();
-    let mut cursor = Location { x: 0, y: 0 };
+    let cursor = Location { x: 0, y: 0 };
     loop {
         let mut delay = Delay::new(Duration::from_millis(1_000)).fuse();
         let mut event = reader.next().fuse();

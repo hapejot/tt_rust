@@ -5,14 +5,8 @@ use std::{
 };
 
 use crossterm::{
-    cursor::{position, MoveTo},
-    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode},
-    execute, queue,
-    terminal::{
-        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
-        LeaveAlternateScreen, SetTitle,
-    },
-    QueueableCommand, Result,
+    cursor::{MoveTo},
+    event::{Event}, queue,
 };
 
 

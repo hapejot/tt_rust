@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, mpsc::RecvTimeoutError};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub enum Address {

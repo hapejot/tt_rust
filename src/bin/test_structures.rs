@@ -1,11 +1,8 @@
 use std::{
-    borrow::Borrow,
-    cell::RefCell,
-    rc::Rc,
     sync::{Arc, Mutex},
 };
 
-use odbc_api::parameter::Text;
+
 
 trait W {
     fn draw(&self);
@@ -37,7 +34,7 @@ impl L {
         }
     }
 
-    pub fn label<T: Into<String>>(&self, s: T) -> &Self {
+    pub fn label<T: Into<String>>(&self, _s: T) -> &Self {
         self
     }
 

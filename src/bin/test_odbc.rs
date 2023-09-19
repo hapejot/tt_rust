@@ -5,9 +5,7 @@
 use odbc_api::{buffers::TextRowSet, Cursor, Environment, ResultSetMetadata};
 use std::{
     error::Error,
-    ffi::CStr,
-    io::{stdout, Write},
-    path::PathBuf,
+    io::{stdout},
 };
 
 /// Maximum number of rows fetched with one row set. Fetching batches of rows is usually much
