@@ -6,6 +6,7 @@ use std::result::Result;
 use serde::{ser, Serialize};
 use tt_rust::data::{Query, Structure, Value, WhereCondition, WhereExpr};
 
+#[derive(Debug)]
 struct ValueMap(BTreeMap<String, Value>);
 
 

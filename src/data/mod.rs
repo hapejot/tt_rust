@@ -1,20 +1,20 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-pub struct Index (usize);
+pub struct Index(usize);
 
-pub trait Vector {
+pub trait Vector: std::fmt::Debug {
     fn insert(&mut self, idx: Index, v: Value);
     fn get(&self, idx: Index) -> &Value;
 }
 
-pub trait Structure {
+pub trait Structure: std::fmt::Debug {
     fn get(&self, name: &str) -> &Value;
     fn set(&mut self, name: &str, value: Value);
     fn keys(&self) -> Vec<String>;
 }
 
-pub trait Scalar {
+pub trait Scalar: std::fmt::Debug {
     fn into_string(&self) -> String;
 }
 
@@ -22,6 +22,16 @@ pub enum Value {
     Scalar(Box<dyn Scalar>),
     Vector(Box<dyn Vector>),
     Structure(Box<dyn Structure>),
+}
+
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Scalar(arg0) => f.debug_tuple("Scalar").field(arg0).finish(),
+            Self::Vector(arg0) => f.debug_tuple("Vector").field(arg0).finish(),
+            Self::Structure(arg0) => f.debug_tuple("Structure").field(arg0).finish(),
+        }
+    }
 }
 
 impl Scalar for String {
@@ -33,6 +43,15 @@ impl Scalar for String {
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Value::Scalar(Box::new(String::from(value)))
+    }
+}
+
+impl From<bool> for Value {
+    fn from(value: bool) -> Self {
+        match value {
+            true => Value::Scalar(Box::new("1".to_string())),
+            false => Value::Scalar(Box::new("0".to_string())),
+        }
     }
 }
 
@@ -174,8 +193,10 @@ impl From<WhereCondition> for String {
     }
 }
 
-
-impl<X> Vector for Vec<X> {
+impl<X> Vector for Vec<X>
+where
+    X: std::fmt::Debug,
+{
     fn insert(&mut self, idx: Index, v: Value) {
         todo!()
     }

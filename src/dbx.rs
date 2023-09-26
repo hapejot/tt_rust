@@ -5,11 +5,14 @@ use std::{
     fmt::Write,
     sync::{Arc, Mutex, MutexGuard},
 };
-mod ser;
+pub mod ser;
 use crate::data::{Structure, Value, Vector};
+
+use self::ser::{CopyRule, CopyRuleLib};
 #[derive(Debug, Clone)]
 pub struct DatabaseBuilder {
     tables: Vec<Table>,
+    copy_rules: CopyRuleLib,
 }
 
 #[derive(Clone)]
@@ -42,6 +45,7 @@ pub struct Table {
 #[derive(Debug, Clone)]
 pub struct DataDictionary {
     tables: Vec<Table>,
+    copy_rules: CopyRuleLib,
 }
 
 #[derive(Debug)]
@@ -176,7 +180,7 @@ impl Database {
         match ddic.tables.iter().find(|x| x.name == table_name) {
             Some(tab) => {
                 let x = self.locked();
-                x.modify_from(tab, row);
+                x.modify_from(tab, ddic.copy_rules.clone(), row);
             }
             None => todo!(),
         }
@@ -191,14 +195,20 @@ impl Database {
     where
         T: Serialize,
     {
-        let mut serializer = ser::SqlSerializer {
-            tab_name: String::new(),
-            row: BTreeMap::new(),
-            current_field: None,            
-        };
+        let mut serializer =
+            ser::SqlSerializer::new(self.arc.m_ddic.lock().unwrap().copy_rules.clone());
         value.serialize(&mut serializer)?;
-        assert!(serializer.row.len() > 0);
-        self.modify_from(serializer.tab_name, Box::new(serializer.row));
+        // assert!(serializer.row.len() > 0);
+        // for x in serializer.operations.iter() {
+        //     println!("operation {:?}", x);
+        // }
+
+        println!("serializer: {:#?}", serializer);
+
+        for x in serializer.get_operations() {
+            println!("operation: {:?}", x);
+        }
+        // self.modify_from(serializer.tab_name, Box::new(serializer.row));
         Ok(())
     }
 }
@@ -241,11 +251,17 @@ impl std::fmt::Debug for Database {
 
 impl DatabaseBuilder {
     pub fn new() -> Self {
-        Self { tables: vec![] }
+        Self {
+            tables: vec![],
+            copy_rules: CopyRuleLib::new(),
+        }
     }
 
     pub fn build(&self) -> Database {
-        let mut dd = DataDictionary { tables: vec![] };
+        let mut dd = DataDictionary {
+            tables: vec![],
+            copy_rules: self.copy_rules.clone(),
+        };
 
         for x in self.tables.iter() {
             dd.tables.push(x.clone());
@@ -262,6 +278,11 @@ impl DatabaseBuilder {
     pub fn table(&mut self, name: String, fields: &[String], key: &[String]) -> &mut Self {
         self.tables
             .push(Table::new(name, fields.to_vec(), key.to_vec()));
+        self
+    }
+
+    pub fn copy_rule(&mut self, name: String, rule: CopyRule) -> &mut Self {
+        self.copy_rules.add(name, rule);
         self
     }
 }
@@ -294,7 +315,7 @@ impl DatabaseImpl {
     /// if the primary key is not satisfied just use an insert since an update
     /// could update more than one row.
     ///
-    fn modify_from(&self, table: &Table, row: Box<dyn Structure>) {
+    fn modify_from(&self, table: &Table, copy_rules: CopyRuleLib, row: Box<dyn Structure>) {
         let (sql_ins, params) = create_insert_statement_from(&table.name, &row);
 
         let param_values: Vec<rusqlite::types::Value> =

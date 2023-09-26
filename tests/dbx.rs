@@ -1,7 +1,10 @@
 use serde::Serialize;
 use tt_rust::{
     data::{Query, WhereCondition, WhereExpr},
-    dbx::{Database, DatabaseBuilder},
+    dbx::{
+        ser::{CopyRule, CopyRuleLib, FieldMapping},
+        Database, DatabaseBuilder,
+    },
 };
 
 #[test]
@@ -46,34 +49,80 @@ fn select() {
     let res = db.select(q);
 }
 
-
+#[derive(Debug, Serialize)]
+#[serde(rename = "communication")]
+pub enum Communication {
+    #[serde(rename = "phone")]
+    Phone {
+        id: Option<usize>,
+        personid: Option<usize>,
+        number: String,
+        role: String,
+    },
+    #[serde(rename = "email")]
+    EMail {
+        id: Option<usize>,
+        personid: Option<usize>,
+        address: String,
+        role: String,
+    },
+}
 #[derive(Debug, Serialize)]
 #[serde(rename = "person")]
 struct Person {
+    id: Option<usize>,
     name1: String,
     name2: String,
+    communications: Vec<Communication>,
     #[serde(rename = "adelstitle")]
     name3: Option<String>,
     name4: Option<String>,
 }
 
 #[test]
+
 fn serialize() {
+    let mut crs = CopyRuleLib::new();
+    let copy_rule_1 = CopyRule::new(vec![FieldMapping {
+        source: "id".to_string(),
+        target: "personid".to_string(),
+    }]);
+
     let p = Person {
         name1: "Peter".to_string(),
         name2: "Jaeckel".to_string(),
         name3: Some("Freiherr".to_string()),
         name4: None,
+        communications: vec![
+            Communication::Phone {
+                number: "+4912345".to_string(),
+                role: "fake".to_string(),
+                id: None,
+                personid: None,
+            },
+            Communication::EMail {
+                address: "a@bc.de".to_string(),
+                role: "dummy".to_string(),
+                id: None,
+                personid: None,
+            },
+        ],
+        id: None,
     };
-
 
     let mut builder = DatabaseBuilder::new();
     let db = builder
         .table(
             "person".into(),
-            &["name1".to_string(), "name2".to_string(), "adelstitle".to_string(), "name4".to_string()],
+            &[
+                "name1".to_string(),
+                "name2".to_string(),
+                "adelstitle".to_string(),
+                "name4".to_string(),
+            ],
             &["name1".to_string()],
         )
+        .copy_rule("communications".to_string(), copy_rule_1)
         .build();
     db.connect();
 
@@ -81,6 +130,4 @@ fn serialize() {
 
     db.modify_from_ser(&p).unwrap();
     assert!(db.is_connected());
-
-
 }
