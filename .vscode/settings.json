@@ -6,5 +6,6 @@
         "Queueable",
         "santiago",
         "sqlite"
-    ]
+    ],
+    "cmake.configureOnOpen": false
 }

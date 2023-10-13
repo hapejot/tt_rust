@@ -1,77 +1,133 @@
+use std::clone::Clone;
 use std::collections::BTreeMap;
 use std::fmt::Write;
+use std::ops::Index;
 
-pub struct Index(usize);
-
-pub trait Vector: std::fmt::Debug {
-    fn insert(&mut self, idx: Index, v: Value);
-    fn get(&self, idx: Index) -> &Value;
+#[derive(Debug, Clone)]
+pub enum Scalar {
+    String(String),
 }
-
-pub trait Structure: std::fmt::Debug {
-    fn get(&self, name: &str) -> &Value;
-    fn set(&mut self, name: &str, value: Value);
-    fn keys(&self) -> Vec<String>;
-}
-
-pub trait Scalar: std::fmt::Debug {
-    fn into_string(&self) -> String;
-}
-
-pub enum Value {
-    Scalar(Box<dyn Scalar>),
-    Vector(Box<dyn Vector>),
-    Structure(Box<dyn Structure>),
-}
-
-impl std::fmt::Debug for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Scalar {
+    pub fn into_string(&self) -> String {
         match self {
-            Self::Scalar(arg0) => f.debug_tuple("Scalar").field(arg0).finish(),
-            Self::Vector(arg0) => f.debug_tuple("Vector").field(arg0).finish(),
-            Self::Structure(arg0) => f.debug_tuple("Structure").field(arg0).finish(),
+            Scalar::String(s) => s.clone(),
         }
     }
 }
 
-impl Scalar for String {
-    fn into_string(&self) -> String {
-        self.clone()
+#[derive(Debug, Clone)]
+pub struct Structure {
+    pairs: Vec<(String, Value)>,
+}
+impl Structure {
+    pub fn new() -> Structure {
+        Structure { pairs: vec![] }
     }
+
+    pub fn keys(&self) -> Vec<String> {
+        self.pairs.iter().map(|(x, _)| x.clone()).collect()
+    }
+
+    pub fn get(&self, k: &str) -> Value {
+        let mut result = Value::EmptyValue;
+        for (key, val) in self.pairs.iter().filter(|(j, _)| j == k) {
+            result = val.clone();
+            break;
+        }
+        result
+    }
+
+    pub fn exists(&self, k: &str) -> bool {
+        self.pairs.iter().any(|(key, _)| key == k)
+    }
+
+    fn index(&self, k: &str) -> Option<usize> {
+        self.pairs.iter().position(|(key, _)| key == k)
+    }
+
+    pub fn remove(&mut self, k: &str) {
+        if let Some(pos) = self.index(k) {
+            self.pairs.remove(pos);
+        }
+    }
+
+    pub fn set(&mut self, k: &str, v: Value) {
+        self.remove(k);
+        self.pairs.push((k.into(), v.clone()));
+    }
+
+    fn get_at(&self, idx: usize) -> &Value {
+        &self.pairs[idx].1
+    }
+
+    fn len(&self) -> usize {
+        self.pairs.len()
+    }
+
+    fn key_at(&self, idx: usize) -> &str {
+        self.pairs[idx].0.as_str()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Value {
+    EmptyValue,
+    ScalarValue(Scalar),
+    VectorValue(Vec<Value>),
+    StructureValue(Structure),
 }
 
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
-        Value::Scalar(Box::new(String::from(value)))
+        Value::ScalarValue(Scalar::String(String::from(value)))
     }
 }
 
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
         match value {
-            true => Value::Scalar(Box::new("1".to_string())),
-            false => Value::Scalar(Box::new("0".to_string())),
+            true => Value::ScalarValue(Scalar::String("1".to_string())),
+            false => Value::ScalarValue(Scalar::String("0".to_string())),
         }
-    }
-}
-
-impl Structure for BTreeMap<String, Value> {
-    fn get(&self, name: &str) -> &Value {
-        self.get(name).unwrap()
-    }
-
-    fn set(&mut self, name: &str, value: Value) {
-        self.insert(String::from(name), value);
-    }
-
-    fn keys(&self) -> Vec<String> {
-        self.keys().into_iter().map(|x| x.clone()).collect()
     }
 }
 
 impl From<BTreeMap<String, Value>> for Value {
     fn from(value: BTreeMap<String, Value>) -> Self {
-        Value::Structure(Box::new(value))
+        Value::StructureValue(Structure {
+            pairs: value.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        })
+    }
+}
+
+impl From<BTreeMap<String, Value>> for Structure {
+    fn from(value: BTreeMap<String, Value>) -> Self {
+        Structure {
+            pairs: value.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        }
+    }
+}
+
+impl From<&BTreeMap<String, Value>> for Structure {
+    fn from(value: &BTreeMap<String, Value>) -> Self {
+        Structure {
+            pairs: value.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        }
+    }
+}
+
+impl<T> From<Vec<T>> for Value
+where
+    Value: From<T>,
+{
+    fn from(value: Vec<T>) -> Self {
+        Value::VectorValue(value.into_iter().map(|x| Value::from(x)).collect())
+    }
+}
+
+impl From<Structure> for Value {
+    fn from(value: Structure) -> Self {
+        Value::StructureValue(value)
     }
 }
 
@@ -98,7 +154,7 @@ impl WhereCondition {
             write!(&mut sql, " WHERE ").unwrap();
             for x in self.all.iter() {
                 match x {
-                    WhereExpr::Equals(fld, Value::Scalar(_)) => {
+                    WhereExpr::Equals(fld, Value::ScalarValue(_)) => {
                         write!(&mut sql, "{}{} = ?", sep, fld).unwrap();
                     }
                     _ => todo!(),
@@ -113,7 +169,7 @@ impl WhereCondition {
         let mut p = vec![];
         for x in self.all.iter() {
             match x {
-                WhereExpr::Equals(_, Value::Scalar(v)) => {
+                WhereExpr::Equals(_, Value::ScalarValue(v)) => {
                     p.push(v.into_string());
                 }
                 _ => todo!(),
@@ -181,7 +237,7 @@ impl From<WhereCondition> for String {
             write!(&mut sql, " WHERE ").unwrap();
             for x in value.all {
                 match x {
-                    WhereExpr::Equals(fld, Value::Scalar(val)) => {
+                    WhereExpr::Equals(fld, Value::ScalarValue(val)) => {
                         write!(&mut sql, "{}{} = '{}'", sep, fld, val.into_string()).unwrap();
                     }
                     _ => todo!(),
@@ -193,15 +249,115 @@ impl From<WhereCondition> for String {
     }
 }
 
-impl<X> Vector for Vec<X>
-where
-    X: std::fmt::Debug,
-{
-    fn insert(&mut self, idx: Index, v: Value) {
-        todo!()
+#[derive(Debug)]
+pub enum WalkerEvent<'walker> {
+    Init,
+    Enter,
+    EnterMap,
+    Key(&'walker str),
+    Value(&'walker Scalar),
+    Exit,
+    Finish,
+}
+
+#[derive(Debug, Clone)]
+enum WalkerState<'v> {
+    Initial,
+    Enter(&'v Value),
+    VecIdx(&'v Vec<Value>, usize),
+    StructIdx(&'v Structure, usize, bool),
+    Done,
+}
+pub struct ValueWalker<'v> {
+    v: &'v Value,
+    state: WalkerState<'v>,
+    stack: Vec<WalkerState<'v>>,
+}
+
+impl<'v> ValueWalker<'v> {
+    pub fn new(v: &'v Value) -> Self {
+        Self {
+            v,
+            state: WalkerState::Initial,
+            stack: vec![],
+        }
+    }
+    fn dispatch(&mut self, v: &'v Value) -> Option<WalkerEvent<'v>> {
+        match v {
+            Value::EmptyValue => {
+                self.state = WalkerState::Done;
+                None
+            }
+            Value::ScalarValue(v) => {
+                Some(WalkerEvent::Value(v))
+            }
+            Value::VectorValue(vector) => {
+                self.stack.push(self.state.clone());
+                self.state = WalkerState::VecIdx(vector, 0);
+                Some(WalkerEvent::Enter)
+            }
+            Value::StructureValue(structure) => {
+                self.stack.push(self.state.clone());
+                self.state = WalkerState::StructIdx(structure, 0, true);
+                Some(WalkerEvent::EnterMap)
+            }
+        }
     }
 
-    fn get(&self, idx: Index) -> &Value {
+    fn restore_state(&mut self) {
+        if let Some(s) = self.stack.pop() {
+            self.state = s;
+        } else {
+            self.state = WalkerState::Done
+        }
+    }
+}
+
+impl<'v> Iterator for ValueWalker<'v> {
+    type Item = WalkerEvent<'v>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        println!("state: {:?}", self.state);
+        match self.state {
+            WalkerState::Initial => self.dispatch(self.v),
+            WalkerState::VecIdx(vector, idx) => {
+                if idx < vector.len() {
+                    self.state = WalkerState::VecIdx(vector, idx + 1);
+                    let v = &vector[idx];
+                    self.dispatch(v)
+                } else {
+                    self.restore_state();
+                    Some(WalkerEvent::Exit)
+                }
+            }
+            WalkerState::Done => None,
+            WalkerState::Enter(v) => self.dispatch(v),
+            WalkerState::StructIdx(structure, idx, is_key) => {
+                if idx < structure.len() {
+                    if is_key {
+                        self.state = WalkerState::StructIdx(structure, idx, false);
+
+                        Some(WalkerEvent::Key(structure.key_at(idx)))
+                    } else {
+                        self.state = WalkerState::StructIdx(structure, idx + 1, true);
+                        let v = structure.get_at(idx);
+                        self.dispatch(v)
+                    }
+                } else {
+                    self.restore_state();
+                    Some(WalkerEvent::Exit)
+                }
+            }
+        }
+    }
+}
+
+impl<'v> IntoIterator for &'v Value {
+    type Item = WalkerEvent<'v>;
+
+    type IntoIter = ValueWalker<'v>;
+
+    fn into_iter(self) -> Self::IntoIter {
         todo!()
     }
 }

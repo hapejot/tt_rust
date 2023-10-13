@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, fmt::Display};
 use std::result::Result;
 
 use serde::{ser, Serialize};
+use tracing::info;
 
 use crate::data::Value;
 use crate::tsort::TopSort;
@@ -141,7 +142,8 @@ impl Context {
                 Operation {
                     index: rowidx,
                     table: ty,
-                    depends: None,
+                    depends: vec![],
+                    done: false,
                 },
             ),
             Ctx::Single {
@@ -149,17 +151,55 @@ impl Context {
                 ty,
                 rowidx,
                 parentrowidx,
-            } => self.operations.insert(
-                0,
-                Operation {
-                    index: rowidx,
-                    table: ty,
-                    depends: Some(Dependency {
-                        record_number: parentrowidx,
-                        copy_rule: self.copy_rules.get(&rel).clone(),
-                    }),
-                },
-            ),
+            } => {
+                let copy_rule = self.copy_rules.get(&rel);
+                if let Some(cr) = copy_rule {
+                    self.operations.insert(
+                        0,
+                        Operation {
+                            index: rowidx,
+                            table: ty,
+                            done: false,
+                            depends: vec![Dependency {
+                                record_number: parentrowidx,
+                                copy_rule: cr.clone(),
+                            }],
+                        },
+                    );
+                    if let Some(m2m) = &cr.many_to_many {
+                        let many_to_many_idx = self.rows.len();
+                        self.rows.push(Row::new());
+                        self.operations.insert(
+                            1,
+                            Operation {
+                                index: many_to_many_idx,
+                                table: m2m.name.clone(),
+                                done: false,
+                                depends: vec![
+                                    Dependency {
+                                        record_number: parentrowidx,
+                                        copy_rule: m2m.copy1.clone(),
+                                    },
+                                    Dependency {
+                                        record_number: rowidx,
+                                        copy_rule: m2m.copy2.clone(),
+                                    },
+                                ],
+                            },
+                        );
+                    }
+                } else {
+                    self.operations.insert(
+                        0,
+                        Operation {
+                            index: rowidx,
+                            table: ty,
+                            depends: vec![],
+                            done: false,
+                        },
+                    )
+                }
+            }
             Ctx::Multiple { .. } => {}
         };
     }
@@ -171,13 +211,78 @@ impl Context {
                     let row = self.rows.get_mut(*rowidx).unwrap();
                     row.insert(k, v);
                 }
-                Ctx::Single { rel, ty, rowidx, .. } => {
+                Ctx::Single {
+                    rel, ty, rowidx, ..
+                } => {
                     let row = self.rows.get_mut(*rowidx).unwrap();
                     row.insert(k, v);
-                },
+                }
                 Ctx::Multiple { .. } => todo!(),
             },
             None => todo!(),
+        }
+    }
+
+    pub(crate) fn get_row(&self, index: usize) -> &Row {
+        self.rows.get(index).unwrap()
+    }
+
+    pub fn get_row_mut(&mut self, index: usize) -> &mut Row {
+        self.rows.get_mut(index).unwrap()
+    }
+
+    fn get_operation(&self, n: usize) -> &Operation {
+        if let Some(op) = self.operations.get(n) {
+            op
+        } else {
+            panic!("no operation at index {}", n);
+        }
+    }
+
+    /// loop through all the operations and apply the copy rules
+    fn perform_copy_rules(&mut self) {
+        let work_list = self.prepare_work_list_for_copy_rules();
+
+        for (source, target, rule) in work_list {
+            self.copy_rows(source, target, rule);
+        }
+    }
+
+    fn prepare_work_list_for_copy_rules(&mut self) -> Vec<(usize, usize, CopyRule)> {
+        let work_list = {
+            let ops = self.get_operations();
+            let mut work = vec![];
+            for x in ops {
+                let Operation { index, depends, .. } = x;
+                for dep in depends {
+                    work.push((dep.record_number, *index, dep.copy_rule.clone()));
+                }
+            }
+            work
+        };
+        work_list
+    }
+
+    fn get_operations(&self) -> Vec<&Operation> {
+        self.operations
+            .iter()
+            .map(|x| x)
+            .collect::<Vec<&Operation>>()
+    }
+
+    fn copy_rows(&mut self, from: usize, to: usize, copy_rule: CopyRule) {
+        info!("copy row from:{} to:{}", from, to);
+        let source_row = self.get_row(from).clone();
+        let target_row = self.get_row_mut(to);
+        let fmap = &copy_rule.field_mappings;
+        if fmap.len() == 0 {
+        } else {
+            for FieldMapping { source, target } in copy_rule.field_mappings.iter() {
+                info!("field {} to {}", source, target);
+                if let Some(v) = source_row.get(source) {
+                    target_row.insert(target.clone(), v.clone());
+                }
+            }
         }
     }
 }
@@ -202,8 +307,12 @@ impl CopyRuleLib {
         self.rules.insert(name, rule);
     }
 
-    fn get(&self, rel: &String) -> &CopyRule {
-        self.rules.get(rel).unwrap()
+    fn get(&self, rel: &String) -> Option<&CopyRule> {
+        if let Some(rules) = self.rules.get(rel) {
+            Some(rules)
+        } else {
+            None
+        }
     }
 }
 
@@ -214,13 +323,43 @@ pub struct FieldMapping {
 }
 
 #[derive(Debug, Clone)]
+pub struct ManyToMany {
+    name: String,
+    table1: String,
+    copy1: CopyRule,
+    table2: String,
+    copy2: CopyRule,
+}
+
+#[derive(Debug, Clone)]
 pub struct CopyRule {
     field_mappings: Vec<FieldMapping>,
+    many_to_many: Option<Box<ManyToMany>>,
 }
 
 impl CopyRule {
     pub fn new(field_mappings: Vec<FieldMapping>) -> Self {
-        Self { field_mappings }
+        Self {
+            field_mappings,
+            many_to_many: None,
+        }
+    }
+    pub fn many_to_many(
+        mut self,
+        name: &str,
+        table1: &str,
+        copy1: CopyRule,
+        table2: &str,
+        copy2: CopyRule,
+    ) -> Self {
+        self.many_to_many = Some(Box::new(ManyToMany {
+            name: name.to_string(),
+            table1: table1.to_string(),
+            copy1: copy1,
+            table2: table2.to_string(),
+            copy2: copy2,
+        }));
+        self
     }
 }
 
@@ -233,8 +372,18 @@ struct Dependency {
 #[derive(Debug)]
 pub struct Operation {
     index: usize,
+    done: bool,
     table: String,
-    depends: Option<Dependency>,
+    depends: Vec<Dependency>,
+}
+impl Operation {
+    pub(crate) fn get_index(&self) -> usize {
+        self.index
+    }
+
+    pub(crate) fn get_table(&self) -> String {
+        self.table.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -243,8 +392,8 @@ pub struct SqlSerializer {
     pub tab_name: String,
     pub current_field: Option<String>,
     pub row: BTreeMap<String, Value>,
-    pub operations: Vec<Operation>,
-    pub stack: Vec<Operation>,
+    // pub operations: Vec<Operation>,
+    // pub stack: Vec<Operation>,
     pub context: Context,
 }
 
@@ -292,7 +441,7 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        self.post_value(Value::from(format!("{}", v).as_str()))
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
@@ -309,9 +458,7 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
         if let Some(field) = &self.current_field {
-            if let Some(op) = self.stack.last_mut() {
-                self.context.set_value(field.clone(), Value::from(v));
-            }
+            self.context.set_value(field.clone(), Value::from(v));
             self.current_field = None;
         }
         // else it is no atomic value, instead
@@ -323,6 +470,10 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+        if let Some(field) = &self.current_field {
+            self.context.set_value(field.clone(), Value::EmptyValue);
+            self.current_field = None;
+        }
         Ok(())
     }
 
@@ -447,49 +598,48 @@ impl SqlSerializer {
             tab_name: String::new(),
             row: BTreeMap::new(),
             current_field: None,
-            operations: vec![],
-            stack: vec![],
+            // operations: vec![],
+            // stack: vec![],
             context: Context::new(copy_rules),
         }
     }
 
     fn enter(&mut self, name: &str) {
-        let op = Operation {
-            index: self.counter,
-            table: String::from(name),
-            depends: None,
-        };
+        // let op = Operation {
+        //     index: self.counter,
+        //     table: String::from(name),
+        //     depends: None,
+        // };
         self.counter += 1;
-        self.stack.push(op);
+        // self.stack.push(op);
     }
 
     fn exit(&mut self) {
-        let op = self.stack.pop().unwrap();
-        self.operations.push(op);
+        // let op = self.stack.pop().unwrap();
+        // self.operations.push(op);
     }
 
-    fn post_value(&self, v: Value) -> Result<(), Error> {
+    fn post_value(&mut self, v: Value) -> Result<(), Error> {
+        if let Some(field) = &self.current_field {
+            self.context.set_value(field.clone(), Value::from(v));
+            self.current_field = None;
+        }
         Ok(())
     }
 
     pub(crate) fn get_operations(&self) -> Vec<&Operation> {
-        let mut tsort = TopSort::new();
-        for x in self.operations.iter() {
-            if let Some(d) = &x.depends {
-                tsort.add(d.record_number, x.index);
-            }
-        }
-
-        let mut result = vec![];
-        for n in tsort.sorted() {
-            result.push(self.get_operation(n));
-        }
+        let result = self.context.operations.iter().collect();
         result
     }
 
     fn get_operation(&self, n: usize) -> &Operation {
-        let r = self.operations.iter().find(|x| x.index == n).unwrap();
+        let r = self.context.get_operation(n);
         r
+    }
+
+    pub(crate) fn perform_copy_rules(&mut self) {
+        info!("handle dependencies {:#?}", self);
+        self.context.perform_copy_rules();
     }
 }
 

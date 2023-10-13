@@ -5,10 +5,13 @@ use std::{
     fmt::Write,
     sync::{Arc, Mutex, MutexGuard},
 };
+use tracing::{error, info};
 pub mod ser;
-use crate::data::{Structure, Value, Vector};
+pub mod de;
 
 use self::ser::{CopyRule, CopyRuleLib};
+use crate::data::{Structure, Value};
+use std::clone::Clone;
 #[derive(Debug, Clone)]
 pub struct DatabaseBuilder {
     tables: Vec<Table>,
@@ -121,7 +124,7 @@ impl Database {
         {
             let mut ddic = self.arc.m_ddic.lock().expect("ok");
             ddic.collect_tables(&con);
-            println!("ddic: {:#?}", ddic);
+            // println!("ddic: {:#?}", ddic);
         }
         // let params = ();
         // con.execute(self.sql.as_str(), params).expect("msg");
@@ -148,18 +151,20 @@ impl Database {
                 let sql_cmd = if t.fields.iter().any(|x| x.exists) {
                     if t.fields.iter().any(|x| !x.exists) {
                         // change table
-                        let str = build_alter_table(t).expect("msg");
-                        str
+                        build_alter_table(t).expect("msg")
                     } else {
-                        String::new()
+                        vec![]
                     }
                 } else {
                     // create table
                     let str = build_create_table(t).expect("msg");
-                    str
+                    vec![str]
                 };
                 let c = l.con.as_ref().unwrap();
-                let _ = c.execute(sql_cmd.as_str(), ());
+                for x in sql_cmd {
+                    let r = c.execute(x.as_str(), ());
+                    info!("execute sql: {:?}", r);
+                }
             }
         }
         // let params = ();
@@ -170,19 +175,22 @@ impl Database {
         // }
     }
 
-    pub fn new_structure(&self) -> Box<dyn Structure> {
-        let s = BTreeMap::<String, Value>::new();
-        Box::new(s)
+    pub fn new_structure(&self) -> Structure {
+        Structure::new()
     }
 
-    pub fn modify_from(&self, table_name: String, row: Box<dyn Structure>) {
+    pub fn modify_from(&self, table_name: String, row: Structure) {
         let ddic = self.arc.m_ddic.lock().unwrap();
+        info!("{} <- {:?}", table_name, row);
         match ddic.tables.iter().find(|x| x.name == table_name) {
             Some(tab) => {
                 let x = self.locked();
-                x.modify_from(tab, ddic.copy_rules.clone(), row);
+                x.modify_from_upd_first(tab, ddic.copy_rules.clone(), row);
             }
-            None => todo!(),
+            None => {
+                error!("unknown table {}", table_name);
+                panic!()
+            }
         }
     }
 
@@ -198,29 +206,27 @@ impl Database {
         let mut serializer =
             ser::SqlSerializer::new(self.arc.m_ddic.lock().unwrap().copy_rules.clone());
         value.serialize(&mut serializer)?;
-        // assert!(serializer.row.len() > 0);
-        // for x in serializer.operations.iter() {
-        //     println!("operation {:?}", x);
-        // }
-
-        println!("serializer: {:#?}", serializer);
-
+        serializer.perform_copy_rules();
         for x in serializer.get_operations() {
-            println!("operation: {:?}", x);
+            let row = serializer.context.get_row(x.get_index());
+            self.modify_from(x.get_table(), Structure::from(row));
         }
-        // self.modify_from(serializer.tab_name, Box::new(serializer.row));
         Ok(())
     }
 }
 
-fn build_alter_table(t: &Table) -> Result<String, std::fmt::Error> {
-    let mut sql = String::new();
-    write!(&mut sql, "ALTER TABLE {} ", t.name)?;
+fn build_alter_table(t: &Table) -> Result<Vec<String>, std::fmt::Error> {
+    let mut result = vec![];
+    // write!(&mut sql, "ALTER TABLE {} ", t.name)?;
     for x in t.fields.iter().filter(|y| !y.exists) {
-        write!(&mut sql, "ADD COLUMN {} ", x.name)?;
+        info!("field {} needs to be created.", x.name);
+        let mut sql = String::new();
+        write!(&mut sql, "ALTER TABLE {} ", t.name)?;
+        write!(&mut sql, "ADD COLUMN {}", x.name)?;
+        result.push(sql);
     }
-    write!(&mut sql, ";")?;
-    Ok(sql)
+    // info!("sql: {}", sql);
+    Ok(result)
 }
 
 fn build_create_table(t: &Table) -> Result<String, std::fmt::Error> {
@@ -281,8 +287,17 @@ impl DatabaseBuilder {
         self
     }
 
+    pub fn with_table(&mut self, t: Table) -> &mut Self {
+        self.tables.push(t);
+        self
+    }
+
     pub fn copy_rule(&mut self, name: String, rule: CopyRule) -> &mut Self {
         self.copy_rules.add(name, rule);
+        self
+    }
+
+    pub fn with_many_to_many(&mut self, name1: &str, name2: &str) -> &mut Self {
         self
     }
 }
@@ -315,7 +330,7 @@ impl DatabaseImpl {
     /// if the primary key is not satisfied just use an insert since an update
     /// could update more than one row.
     ///
-    fn modify_from(&self, table: &Table, copy_rules: CopyRuleLib, row: Box<dyn Structure>) {
+    fn modify_from(&self, table: &Table, copy_rules: CopyRuleLib, row: Structure) {
         let (sql_ins, params) = create_insert_statement_from(&table.name, &row);
 
         let param_values: Vec<rusqlite::types::Value> =
@@ -350,6 +365,33 @@ impl DatabaseImpl {
         }
     }
 
+    fn modify_from_upd_first(&self, table: &Table, copy_rules: CopyRuleLib, row: Structure) {
+        if let Some(con) = &self.con {
+            let (sql_upd, params) = create_update_statement_from(table, &row);
+            let mut stmt = con.prepare(sql_upd.as_str()).unwrap();
+            let param_values: Vec<rusqlite::types::Value> =
+                params.iter().map(|x| x.clone().into()).collect();
+
+            match stmt.execute(rusqlite::params_from_iter(param_values)) {
+                Ok(1) => {}
+                Ok(x) => {
+                    info!("update {} rows.", x);
+                    let (sql_ins, params) = create_insert_statement_from(&table.name, &row);
+
+                    let param_values: Vec<rusqlite::types::Value> =
+                        params.iter().map(|x| x.clone().into()).collect();
+
+                    let mut stmt = con.prepare(sql_ins.as_str()).unwrap();
+                    match stmt.execute(rusqlite::params_from_iter(param_values)) {
+                        Ok(_) => {}
+                        _ => panic!(),
+                    }
+                }
+                Err(_) => todo!(),
+            }
+        }
+    }
+
     pub fn select(&self, q: crate::data::Query) -> Value {
         let result: Vec<Value> = vec![];
         if let Some(con) = &self.con {
@@ -368,17 +410,17 @@ impl DatabaseImpl {
                 }
             }
         };
-        Value::Vector(Box::new(result))
+        Value::VectorValue(result)
     }
 }
 
-fn create_update_statement_from(table: &Table, row: &Box<dyn Structure>) -> (String, Vec<String>) {
+fn create_update_statement_from(table: &Table, row: &Structure) -> (String, Vec<String>) {
     let mut sql = String::new();
     write!(&mut sql, "UPDATE {} SET ", table.name).unwrap();
     let mut sep = "";
     let mut params = vec![];
     for k in row.keys().iter() {
-        if let Value::Scalar(v) = row.get(k) {
+        if let Value::ScalarValue(v) = row.get(k) {
             write!(&mut sql, "{}{} = ?", sep, k).unwrap();
             sep = ",";
             params.push(v.into_string());
@@ -387,29 +429,31 @@ fn create_update_statement_from(table: &Table, row: &Box<dyn Structure>) -> (Str
     write!(&mut sql, " WHERE ").unwrap();
     sep = "";
     for k in table.key().iter() {
-        if let Value::Scalar(v) = row.get(k) {
+        if let Value::ScalarValue(v) = row.get(k) {
             write!(&mut sql, "{}{} = ?", sep, k).unwrap();
             sep = " AND ";
             params.push(v.into_string());
         }
     }
-    println!("insert: {}", sql);
+    // println!("insert: {}", sql);
     (sql, params)
 }
 
-fn create_insert_statement_from(arg: &str, s: &Box<dyn Structure>) -> (String, Vec<String>) {
+fn create_insert_statement_from(arg: &str, s: &Structure) -> (String, Vec<String>) {
     let mut sql = String::new();
     write!(&mut sql, "INSERT INTO {}(", arg).unwrap();
     let mut sep = "";
-    for k in s.keys() {
-        write!(&mut sql, "{}{}", sep, k).unwrap();
-        sep = ",";
+    for k in s.keys().iter() {
+        if let Value::ScalarValue(v) = s.get(k) {
+            write!(&mut sql, "{}{}", sep, k).unwrap();
+            sep = ",";
+        }
     }
     write!(&mut sql, ") VALUES (").unwrap();
     sep = "";
     let mut params = vec![];
     for k in s.keys().iter() {
-        if let Value::Scalar(v) = s.get(k) {
+        if let Value::ScalarValue(v) = s.get(k) {
             write!(&mut sql, "{}?", sep).unwrap();
             sep = ",";
             params.push(v.into_string());
@@ -417,6 +461,6 @@ fn create_insert_statement_from(arg: &str, s: &Box<dyn Structure>) -> (String, V
     }
 
     write!(&mut sql, ")").unwrap();
-    println!("insert: {}", sql);
+    // println!("insert: {}", sql);
     (sql, params)
 }

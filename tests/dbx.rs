@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_derive::Serialize;
 use tt_rust::{
     data::{Query, WhereCondition, WhereExpr},
     dbx::{
