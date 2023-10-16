@@ -9,7 +9,7 @@ use tt_rust::{
 };
 
 #[test]
-fn first() {
+fn modify_from() {
     let mut builder = DatabaseBuilder::new();
     let db = builder
         .table(
