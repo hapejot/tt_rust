@@ -6,7 +6,7 @@ use serde::{ser, Serialize};
 use tracing::info;
 
 use crate::data::Value;
-use crate::tsort::TopSort;
+
 
 #[derive(Debug)]
 pub enum Error {
@@ -207,12 +207,12 @@ impl Context {
     fn set_value(&mut self, k: String, v: Value) {
         match self.stack.last() {
             Some(curr) => match curr {
-                Ctx::Main { ty: r, rowidx } => {
+                Ctx::Main { ty: _r, rowidx } => {
                     let row = self.rows.get_mut(*rowidx).unwrap();
                     row.insert(k, v);
                 }
                 Ctx::Single {
-                    rel, ty, rowidx, ..
+                      rowidx, ..
                 } => {
                     let row = self.rows.get_mut(*rowidx).unwrap();
                     row.insert(k, v);
@@ -412,31 +412,31 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
         self.post_value(v.into())
     }
 
-    fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
+    fn serialize_i8(self, _v: i8) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
-    fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
+    fn serialize_i16(self, _v: i16) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
-    fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
+    fn serialize_i32(self, _v: i32) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
-    fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
+    fn serialize_i64(self, _v: i64) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
-    fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
+    fn serialize_u8(self, _v: u8) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
-    fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
+    fn serialize_u16(self, _v: u16) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
-    fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
+    fn serialize_u32(self, _v: u32) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
@@ -444,15 +444,15 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
         self.post_value(Value::from(format!("{}", v).as_str()))
     }
 
-    fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
+    fn serialize_f32(self, _v: f32) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
-    fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
+    fn serialize_f64(self, _v: f64) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
-    fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
+    fn serialize_char(self, _v: char) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
@@ -465,7 +465,7 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
         Ok(())
     }
 
-    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+    fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
@@ -488,23 +488,23 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
         todo!()
     }
 
-    fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
     fn serialize_unit_variant(
         self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
         todo!()
     }
 
     fn serialize_newtype_struct<T: ?Sized>(
         self,
-        name: &'static str,
-        value: &T,
+        _name: &'static str,
+        _value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: Serialize,
@@ -514,10 +514,10 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
 
     fn serialize_newtype_variant<T: ?Sized>(
         self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
-        value: &T,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: Serialize,
@@ -525,7 +525,7 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
         todo!()
     }
 
-    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         // self.current_field = None;
         if let Some(name) = &self.current_field {
             self.context.set_relation(name.clone());
@@ -535,29 +535,29 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
         Ok(self)
     }
 
-    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
+    fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
         todo!()
     }
 
     fn serialize_tuple_struct(
         self,
-        name: &'static str,
-        len: usize,
+        _name: &'static str,
+        _len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
         todo!()
     }
 
     fn serialize_tuple_variant(
         self,
-        name: &'static str,
-        variant_index: u32,
-        variant: &'static str,
-        len: usize,
+        _name: &'static str,
+        _variant_index: u32,
+        _variant: &'static str,
+        _len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
         todo!()
     }
 
-    fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         todo!()
     }
 
@@ -578,9 +578,9 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
     fn serialize_struct_variant(
         self,
         name: &'static str,
-        variant_index: u32,
+        _variant_index: u32,
         variant: &'static str,
-        len: usize,
+        _len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
         self.enter(name);
         if let Some(name) = &self.current_field {
@@ -604,7 +604,7 @@ impl SqlSerializer {
         }
     }
 
-    fn enter(&mut self, name: &str) {
+    fn enter(&mut self, _name: &str) {
         // let op = Operation {
         //     index: self.counter,
         //     table: String::from(name),
@@ -664,7 +664,7 @@ impl<'a> ser::SerializeTuple for &'a mut SqlSerializer {
     type Ok = ();
     type Error = Error;
 
-    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    fn serialize_element<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
     where
         T: Serialize,
     {
@@ -679,7 +679,7 @@ impl<'a> ser::SerializeTupleStruct for &'a mut SqlSerializer {
     type Ok = ();
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    fn serialize_field<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
     where
         T: Serialize,
     {
@@ -695,7 +695,7 @@ impl<'a> ser::SerializeTupleVariant for &'a mut SqlSerializer {
     type Ok = ();
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    fn serialize_field<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
     where
         T: Serialize,
     {
@@ -711,14 +711,14 @@ impl<'a> ser::SerializeMap for &'a mut SqlSerializer {
 
     type Error = Error;
 
-    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
+    fn serialize_key<T: ?Sized>(&mut self, _key: &T) -> Result<(), Self::Error>
     where
         T: Serialize,
     {
         todo!()
     }
 
-    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    fn serialize_value<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
     where
         T: Serialize,
     {

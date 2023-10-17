@@ -1,3 +1,5 @@
+
+
 use crossterm::{cursor::MoveTo, style::Print, QueueableCommand};
 
 use super::Glyph;
@@ -10,6 +12,7 @@ impl Frame {
     pub fn new(content: Box<dyn Glyph>) -> Self {
         Self { content }
     }
+
 }
 
 impl Glyph for Frame {
@@ -19,12 +22,12 @@ impl Glyph for Frame {
 
         w.queue(MoveTo(r.x - 1, r.y - 1)).unwrap();
         w.queue(Print("┌")).unwrap();
-        for i in 0..r.w {
+        for _i in 0..r.w {
             w.queue(Print("─")).unwrap();
         }
         w.queue(Print("┐")).unwrap();
 
-        for y in r.y..r.y + r.h {
+        for y in r.y..r.y + r.h + 2 {
             w.queue(MoveTo(r.x - 1, y)).unwrap();
             w.queue(Print("│")).unwrap();
             w.queue(MoveTo(r.x + r.w, y)).unwrap();
@@ -33,7 +36,7 @@ impl Glyph for Frame {
 
         w.queue(MoveTo(r.x - 1, r.y + r.h + 2)).unwrap();
         w.queue(Print("└")).unwrap();
-        for i in 0..r.w {
+        for _i in 0..r.w {
             w.queue(Print("─")).unwrap();
         }
         w.queue(Print("┘")).unwrap();
@@ -47,5 +50,13 @@ impl Glyph for Frame {
             w: r.w - 2,
             h: r.h - 2,
         }
+    }
+
+    fn resize(&mut self, width: u16, height: u16) {
+        self.content.resize(width, height);
+    }
+
+    fn handle_event(&mut self, _r: crossterm::event::Event) {
+        todo!()
     }
 }

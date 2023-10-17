@@ -1,10 +1,9 @@
-use serde::Serialize;
+
 use serde_derive::Serialize;
 use tt_rust::{
     data::{Query, WhereCondition, WhereExpr},
     dbx::{
-        ser::{CopyRule, CopyRuleLib, FieldMapping},
-        Database, DatabaseBuilder,
+        ser::{CopyRule, CopyRuleLib, FieldMapping}, DatabaseBuilder,
     },
 };
 
@@ -47,7 +46,7 @@ fn select() {
         WhereCondition::new().and(WhereExpr::Equals("type".into(), "Null".into())),
     );
 
-    let res = db.select(q);
+    let _res = db.select(q);
 }
 
 #[derive(Debug, Serialize)]
@@ -83,7 +82,7 @@ struct Person {
 #[test]
 
 fn serialize() {
-    let mut crs = CopyRuleLib::new();
+    let _crs = CopyRuleLib::new();
     let copy_rule_1 = CopyRule::new(vec![FieldMapping {
         source: "id".to_string(),
         target: "personid".to_string(),

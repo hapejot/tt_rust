@@ -1,7 +1,6 @@
-use rusqlite::{ffi::Error, Connection, ErrorCode, Params};
+use rusqlite::{ffi::Error, Connection, ErrorCode};
 use serde::Serialize;
 use std::{
-    collections::BTreeMap,
     fmt::Write,
     sync::{Arc, Mutex, MutexGuard},
 };
@@ -297,7 +296,7 @@ impl DatabaseBuilder {
         self
     }
 
-    pub fn with_many_to_many(&mut self, name1: &str, name2: &str) -> &mut Self {
+    pub fn with_many_to_many(&mut self, _name1: &str, _name2: &str) -> &mut Self {
         self
     }
 }
@@ -330,7 +329,7 @@ impl DatabaseImpl {
     /// if the primary key is not satisfied just use an insert since an update
     /// could update more than one row.
     ///
-    fn modify_from(&self, table: &Table, copy_rules: CopyRuleLib, row: Structure) {
+    fn modify_from(&self, table: &Table, _copy_rules: CopyRuleLib, row: Structure) {
         let (sql_ins, params) = create_insert_statement_from(&table.name, &row);
 
         let param_values: Vec<rusqlite::types::Value> =
@@ -365,7 +364,7 @@ impl DatabaseImpl {
         }
     }
 
-    fn modify_from_upd_first(&self, table: &Table, copy_rules: CopyRuleLib, row: Structure) {
+    fn modify_from_upd_first(&self, table: &Table, _copy_rules: CopyRuleLib, row: Structure) {
         if let Some(con) = &self.con {
             let (sql_upd, params) = create_update_statement_from(table, &row);
             let mut stmt = con.prepare(sql_upd.as_str()).unwrap();
@@ -401,7 +400,7 @@ impl DatabaseImpl {
             ));
             match sql_result {
                 Ok(mut rows) => {
-                    while let Some(row) = rows.next().unwrap() {
+                    while let Some(_row) = rows.next().unwrap() {
                         // for c in 0..&stmt.column_count() {}
                     }
                 }
@@ -444,7 +443,7 @@ fn create_insert_statement_from(arg: &str, s: &Structure) -> (String, Vec<String
     write!(&mut sql, "INSERT INTO {}(", arg).unwrap();
     let mut sep = "";
     for k in s.keys().iter() {
-        if let Value::ScalarValue(v) = s.get(k) {
+        if let Value::ScalarValue(_v) = s.get(k) {
             write!(&mut sql, "{}{}", sep, k).unwrap();
             sep = ",";
         }

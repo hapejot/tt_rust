@@ -30,7 +30,7 @@ impl Structure {
 
     pub fn get(&self, k: &str) -> Value {
         let mut result = Value::EmptyValue;
-        for (key, val) in self.pairs.iter().filter(|(j, _)| j == k) {
+        for (_key, val) in self.pairs.iter().filter(|(j, _)| j == k) {
             result = val.clone();
             break;
         }

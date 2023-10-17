@@ -19,22 +19,34 @@ impl Panel {
             },
         }
     }
+
 }
 
 impl Glyph for Panel {
+    fn resize(&mut self, width: u16, height: u16)  {
+        self.area = Rect{x:0,y:0,w: width, h: height};
+    }
+
     fn write_to(&self, w: &mut dyn Write) {
         for i in 1..=self.area.w {
-            let label: Vec<char> = format!("{i:02}").chars().collect();
+            let label: Vec<char> = format!("{i:03}").chars().collect();
             w.queue(MoveTo(self.area.x + i - 1, self.area.y + 1))
                 .unwrap();
             w.queue(Print(label[0])).unwrap();
             w.queue(MoveTo(self.area.x + i - 1, self.area.y + 2))
                 .unwrap();
             w.queue(Print(label[1])).unwrap();
+            w.queue(MoveTo(self.area.x + i - 1, self.area.y + 3))
+                .unwrap();
+            w.queue(Print(label[2])).unwrap();
         }
     }
 
     fn area(&self) -> super::Rect {
         self.area.clone()
+    }
+
+    fn handle_event(&mut self, _r: crossterm::event::Event) {
+        todo!()
     }
 }

@@ -14,4 +14,6 @@ pub struct Rect {
 pub trait Glyph {
     fn write_to(&self, w: &mut dyn Write);
     fn area(&self) -> Rect;
+    fn resize(&mut self, width: u16, height: u16);
+    fn handle_event(&mut self, r: crossterm::event::Event);
 }
