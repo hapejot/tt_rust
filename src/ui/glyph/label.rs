@@ -1,4 +1,12 @@
-use super::{Rect, Glyph};
+use crossterm::{cursor::MoveTo, style::Print, QueueableCommand};
+use tracing::info;
+
+use super::{
+    AppError::{self, NotRelevant},
+    AppRequest::{self, SetValue},
+    AppResult::{self, Redraw},
+    Glyph, Rect,
+};
 
 pub struct Label {
     area: Rect,
@@ -16,7 +24,8 @@ impl Label {
 
 impl Glyph for Label {
     fn write_to(&self, w: &mut dyn std::io::Write) {
-        w.write(self.txt.as_bytes()).unwrap();
+        w.queue(MoveTo(self.area.x, self.area.y)).unwrap();
+        w.queue(Print(self.txt.clone())).unwrap();
     }
 
     fn area(&self) -> Rect {
@@ -27,7 +36,7 @@ impl Glyph for Label {
         todo!()
     }
 
-    fn handle_event(&mut self, event: crossterm::event::Event) -> bool {
+    fn handle_term_event(&mut self, event: crossterm::event::Event) -> bool {
         match event {
             _ => false,
         }
@@ -38,6 +47,17 @@ impl Glyph for Label {
     }
 
     fn allocate(&mut self, allocation: Rect) {
-        todo!()
+        self.area = allocation;
+        info!("allocate label to {:?}", &self.area);
+    }
+
+    fn handle_app_request(&mut self, req: &AppRequest) -> Result<AppResult, AppError> {
+        match req {
+            SetValue(v) => {
+                self.txt = v.clone();
+                Ok(Redraw)
+            }
+            _ => Err(NotRelevant),
+        }
     }
 }

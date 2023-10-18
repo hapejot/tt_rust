@@ -20,6 +20,8 @@ serde = { version = "1.0"}
 error = "0.1.9"
 tracing = "0.1.37"
 bytes = "1.5.0"
+tracing-appender = "0.2.2"
+tracing-subscriber = "0.3.17"
 
 [dev-dependencies]
 serde_derive = "1.0"

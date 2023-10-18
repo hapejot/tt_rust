@@ -5,6 +5,7 @@
 
 use std::{
     borrow::BorrowMut,
+    fmt,
     io::{stdout, Write},
     rc::Rc,
     sync::{Arc, Mutex},
@@ -15,9 +16,8 @@ use chrono::Local;
 
 use futures::{future::FutureExt, select, StreamExt};
 use futures_timer::Delay;
-use tt_rust::{
-    ui::glyph::{frame::Frame, panel::Panel, Glyph, label::Label},
-};
+use tracing::*;
+use tt_rust::ui::glyph::{frame::Frame, label::Label, panel::Panel, AppRequest, Glyph};
 
 use crossterm::{
     cursor::{position, MoveTo},
@@ -61,27 +61,29 @@ pub fn print_box(w: &mut Box<dyn Write>) -> Result<()> {
     Ok(())
 }
 
-
 async fn event_loop(w: &mut Box<dyn Write>, _d: &AppData) {
     let _ = w.queue(Clear(ClearType::All)).unwrap();
     let mut reader = EventStream::new();
- 
+
     let mut p = Box::new(Panel::new());
     let label = Label::new("Text..".to_string());
     p.add(Box::new(label));
     let mut f = Frame::new(p);
- let  x = 3;
- let  y = 3;
+    let x = 3;
+    let y = 3;
     loop {
         f.write_to(w);
         w.queue(MoveTo(x, y)).unwrap();
         w.flush().unwrap();
         if let Some(Ok(r)) = reader.next().await {
+            let _ = f.handle_app_request(&AppRequest::SetValue(format!("{r:?}")));
             match r {
                 Event::Key(KeyEvent {
                     code: KeyCode::Esc, ..
                 }) => break,
-                r => {let _ = f.handle_event(r);},
+                r => {
+                    let _ = f.handle_term_event(r);
+                }
             }
         }
     }
@@ -161,6 +163,16 @@ impl AppData {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    use tracing_subscriber::filter::LevelFilter;
+    let log_file = std::fs::File::create("term.log")?;
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(Mutex::new(log_file))
+        .with_ansi(false)
+        .with_max_level(LevelFilter::TRACE)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    info!("starting");
+
     enable_raw_mode()?;
 
     execute!(stdout(), EnableMouseCapture, EnterAlternateScreen)?;

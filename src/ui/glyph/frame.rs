@@ -1,6 +1,7 @@
 use crossterm::{cursor::MoveTo, event::Event, style::Print, QueueableCommand};
+use tracing::*;
 
-use super::{Glyph, Rect};
+use super::{Glyph, Rect, AppRequest, AppResult, AppError};
 
 pub struct Frame {
     area: Rect,
@@ -18,52 +19,44 @@ impl Frame {
 
 impl Glyph for Frame {
     fn write_to(&self, w: &mut dyn std::io::Write) {
-        self.content.write_to(w);
-        let r = self.area();
+        if self.area.w > 2 && self.area.h > 2 {
+            self.content.write_to(w);
+            let r = self.area();
+            trace!("write box on {:?}", &r);
+            w.queue(MoveTo(r.x, r.y)).unwrap();
+            w.queue(Print("┌")).unwrap();
+            horizontal_line(r.w - 2, w);
+            w.queue(Print("┐")).unwrap();
 
-        w.queue(MoveTo(r.x - 1, r.y - 1)).unwrap();
-        w.queue(Print("┌")).unwrap();
-        for _i in 0..r.w {
-            w.queue(Print("─")).unwrap();
-        }
-        w.queue(Print("┐")).unwrap();
+            for y in 0..(r.h - 2) {
+                w.queue(MoveTo(r.x, r.y + 1 + y)).unwrap();
+                w.queue(Print("│")).unwrap();
+                w.queue(MoveTo(r.x + r.w - 1, r.y + y + 1)).unwrap();
+                w.queue(Print("│")).unwrap();
+            }
 
-        for y in r.y..r.y + r.h + 2 {
-            w.queue(MoveTo(r.x - 1, y)).unwrap();
-            w.queue(Print("│")).unwrap();
-            w.queue(MoveTo(r.x + r.w, y)).unwrap();
-            w.queue(Print("│")).unwrap();
+            w.queue(MoveTo(r.x, r.y + r.h)).unwrap();
+            w.queue(Print("└")).unwrap();
+            horizontal_line(r.w - 2, w);
+            w.queue(Print("┘")).unwrap();
         }
-
-        w.queue(MoveTo(r.x - 1, r.y + r.h + 2)).unwrap();
-        w.queue(Print("└")).unwrap();
-        for _i in 0..r.w {
-            w.queue(Print("─")).unwrap();
-        }
-        w.queue(Print("┘")).unwrap();
     }
 
     fn area(&self) -> super::Rect {
-        let r = self.content.area();
-        super::Rect {
-            x: r.x + 1,
-            y: r.y + 1,
-            w: r.w - 2,
-            h: r.h - 2,
-        }
+        self.area.clone()
     }
 
     fn resize(&mut self, width: u16, height: u16) {
         self.content.resize(width, height);
     }
 
-    fn handle_event(&mut self, r: Event)->bool {
+    fn handle_term_event(&mut self, r: Event) -> bool {
         match r {
             Event::Resize(w, h) => {
                 self.allocate(super::Rect { x: 0, y: 0, w, h });
                 true
             }
-            x => self.content.handle_event(x),
+            x => self.content.handle_term_event(x),
         }
     }
 
@@ -72,6 +65,7 @@ impl Glyph for Frame {
     }
 
     fn allocate(&mut self, allocation: super::Rect) {
+        info!("allocated frame to {:?}", &allocation);
         self.area = allocation.clone();
         self.content.allocate(Rect {
             x: allocation.x + 1,
@@ -79,5 +73,15 @@ impl Glyph for Frame {
             w: allocation.w - 2,
             h: allocation.h - 2,
         });
+    }
+
+    fn handle_app_request(&mut self, req: &AppRequest) -> Result<AppResult, AppError> {
+        self.content.handle_app_request(req)
+    }
+}
+
+fn horizontal_line(width: u16, w: &mut dyn std::io::Write) {
+    for _i in 0..(width) {
+        w.queue(Print("─")).unwrap();
     }
 }

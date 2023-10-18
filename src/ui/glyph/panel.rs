@@ -7,7 +7,7 @@ use crossterm::{
     QueueableCommand,
 };
 
-use super::{Glyph, Rect};
+use super::{AppError, AppRequest, AppResult, Glyph, Rect};
 
 pub struct Panel {
     area: Rect,
@@ -17,12 +17,7 @@ pub struct Panel {
 impl Panel {
     pub fn new() -> Self {
         Self {
-            area: Rect {
-                x: 0,
-                y: 0,
-                w: 80,
-                h: 25,
-            },
+            area: Rect::new(),
             elements: vec![],
         }
     }
@@ -57,7 +52,7 @@ impl Glyph for Panel {
     }
 
     fn write_to(&self, w: &mut dyn Write) {
-        for x in self.elements.iter(){
+        for x in self.elements.iter() {
             x.write_to(w);
         }
     }
@@ -66,12 +61,12 @@ impl Glyph for Panel {
         self.area.clone()
     }
 
-    fn handle_event(&mut self, event: Event) -> bool {
+    fn handle_term_event(&mut self, event: Event) -> bool {
         match event {
             r => {
                 let mut handled = false;
                 for x in self.elements.iter_mut() {
-                    handled = x.handle_event(r.clone());
+                    handled = x.handle_term_event(r.clone());
                     if handled {
                         break;
                     }
@@ -80,12 +75,31 @@ impl Glyph for Panel {
             }
         }
     }
-
     fn request(&mut self) -> super::Requirements {
         todo!()
     }
-
     fn allocate(&mut self, allocation: Rect) {
-        self.area = allocation;
+        self.area = allocation.clone();
+        let mut y = self.area.y;
+        for x in self.elements.iter_mut() {
+            x.allocate(Rect {
+                x: allocation.x,
+                y: y,
+                w: allocation.w,
+                h: 1,
+            });
+            y += 1;
+        }
+    }
+
+    fn handle_app_request(&mut self, req: &AppRequest) -> Result<AppResult, AppError> {
+        let mut r = Err(super::AppError::NotRelevant);
+        for x in self.elements.iter_mut() {
+            r = x.handle_app_request(req);
+            if r.is_ok() {
+                break;
+            }
+        }
+        r
     }
 }
