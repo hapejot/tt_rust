@@ -1,18 +1,19 @@
+use crossterm::{cursor::MoveTo, event::Event, style::Print, QueueableCommand};
 
-
-use crossterm::{cursor::MoveTo, style::Print, QueueableCommand};
-
-use super::Glyph;
+use super::{Glyph, Rect};
 
 pub struct Frame {
+    area: Rect,
     content: Box<dyn Glyph>,
 }
 
 impl Frame {
     pub fn new(content: Box<dyn Glyph>) -> Self {
-        Self { content }
+        Self {
+            area: Rect::new(),
+            content,
+        }
     }
-
 }
 
 impl Glyph for Frame {
@@ -56,7 +57,27 @@ impl Glyph for Frame {
         self.content.resize(width, height);
     }
 
-    fn handle_event(&mut self, _r: crossterm::event::Event) {
+    fn handle_event(&mut self, r: Event)->bool {
+        match r {
+            Event::Resize(w, h) => {
+                self.allocate(super::Rect { x: 0, y: 0, w, h });
+                true
+            }
+            x => self.content.handle_event(x),
+        }
+    }
+
+    fn request(&mut self) -> super::Requirements {
         todo!()
+    }
+
+    fn allocate(&mut self, allocation: super::Rect) {
+        self.area = allocation.clone();
+        self.content.allocate(Rect {
+            x: allocation.x + 1,
+            y: allocation.y + 1,
+            w: allocation.w - 2,
+            h: allocation.h - 2,
+        });
     }
 }
