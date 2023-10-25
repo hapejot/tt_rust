@@ -2,10 +2,13 @@ use std::{collections::BTreeMap, fmt::Display};
 
 use std::result::Result;
 
+use rusqlite::ToSql;
+use rusqlite::types::{Null, Value};
 use serde::{ser, Serialize};
 use tracing::info;
 
-use crate::data::Value;
+use super::{DBRow, SqlValue};
+
 
 
 #[derive(Debug)]
@@ -62,15 +65,12 @@ pub enum Ctx {
     },
 }
 
-type Row = BTreeMap<String, Value>;
-
-#[derive(Debug)]
 pub struct Context {
     rel: Option<String>,
     stack: Vec<Ctx>,
     copy_rules: CopyRuleLib,
     operations: Vec<Operation>,
-    rows: Vec<Row>,
+    rows: Vec<DBRow>,
 }
 
 impl Context {
@@ -98,7 +98,7 @@ impl Context {
 
     fn push_context(&mut self, rel: &Option<String>, ty: String) {
         let rowidx = self.rows.len();
-        self.rows.push(Row::new());
+        self.rows.push(DBRow::new());
         match rel {
             Some(rel) => self.stack.push(Ctx::Single {
                 rel: rel.clone(),
@@ -168,7 +168,7 @@ impl Context {
                     );
                     if let Some(m2m) = &cr.many_to_many {
                         let many_to_many_idx = self.rows.len();
-                        self.rows.push(Row::new());
+                        self.rows.push(DBRow::new());
                         self.operations.insert(
                             1,
                             Operation {
@@ -204,18 +204,18 @@ impl Context {
         };
     }
 
-    fn set_value(&mut self, k: String, v: Value) {
+    fn set_value<T: Into<SqlValue>>(&mut self, k: String, v: T) {
         match self.stack.last() {
             Some(curr) => match curr {
                 Ctx::Main { ty: _r, rowidx } => {
                     let row = self.rows.get_mut(*rowidx).unwrap();
-                    row.insert(k, v);
+                    row.insert(k, v.into());
                 }
                 Ctx::Single {
                       rowidx, ..
                 } => {
                     let row = self.rows.get_mut(*rowidx).unwrap();
-                    row.insert(k, v);
+                    row.insert(k, v.into());
                 }
                 Ctx::Multiple { .. } => todo!(),
             },
@@ -223,11 +223,11 @@ impl Context {
         }
     }
 
-    pub(crate) fn get_row(&self, index: usize) -> &Row {
+    pub(crate) fn get_row(&self, index: usize) -> &DBRow {
         self.rows.get(index).unwrap()
     }
 
-    pub fn get_row_mut(&mut self, index: usize) -> &mut Row {
+    pub fn get_row_mut(&mut self, index: usize) -> &mut DBRow {
         self.rows.get_mut(index).unwrap()
     }
 
@@ -386,12 +386,12 @@ impl Operation {
     }
 }
 
-#[derive(Debug)]
+
 pub struct SqlSerializer {
     pub counter: usize,
     pub tab_name: String,
     pub current_field: Option<String>,
-    pub row: BTreeMap<String, Value>,
+    pub row: DBRow,
     // pub operations: Vec<Operation>,
     // pub stack: Vec<Operation>,
     pub context: Context,
@@ -409,7 +409,7 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
     type SerializeStructVariant = Self;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        self.post_value(v.into())
+        self.post_value(v)
     }
 
     fn serialize_i8(self, _v: i8) -> Result<Self::Ok, Self::Error> {
@@ -441,7 +441,7 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        self.post_value(Value::from(format!("{}", v).as_str()))
+        self.post_value(v)
     }
 
     fn serialize_f32(self, _v: f32) -> Result<Self::Ok, Self::Error> {
@@ -458,8 +458,7 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
         if let Some(field) = &self.current_field {
-            self.context.set_value(field.clone(), Value::from(v));
-            self.current_field = None;
+            self.context.set_value(field.clone(), v);
         }
         // else it is no atomic value, instead
         Ok(())
@@ -471,7 +470,7 @@ impl<'a> ser::Serializer for &'a mut SqlSerializer {
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         if let Some(field) = &self.current_field {
-            self.context.set_value(field.clone(), Value::EmptyValue);
+            self.context.set_value(field.clone(), Value::Null);
             self.current_field = None;
         }
         Ok(())
@@ -596,7 +595,7 @@ impl SqlSerializer {
         Self {
             counter: 1,
             tab_name: String::new(),
-            row: BTreeMap::new(),
+            row: DBRow::new(),
             current_field: None,
             // operations: vec![],
             // stack: vec![],
@@ -619,9 +618,9 @@ impl SqlSerializer {
         // self.operations.push(op);
     }
 
-    fn post_value(&mut self, v: Value) -> Result<(), Error> {
+    fn post_value<T: Into<SqlValue>>(&mut self, v: T) -> Result<(), Error> {
         if let Some(field) = &self.current_field {
-            self.context.set_value(field.clone(), Value::from(v));
+            self.context.set_value(field.clone(), v);
             self.current_field = None;
         }
         Ok(())
@@ -638,7 +637,7 @@ impl SqlSerializer {
     }
 
     pub(crate) fn perform_copy_rules(&mut self) {
-        info!("handle dependencies {:#?}", self);
+        info!("handle dependencies");
         self.context.perform_copy_rules();
     }
 }
@@ -790,10 +789,7 @@ fn context() {
     c.enter_vec("V".to_string());
     c.set_relation("r2".to_string());
     c.enter("S2".to_string());
-    println!("{:#?}", c.get_relationship());
-    println!("{:#?}", c);
     c.leave();
     c.leave();
     c.leave();
-    println!("{:#?}", c);
 }

@@ -5,6 +5,7 @@
 
 use std::{
     borrow::BorrowMut,
+    collections::{vec_deque, VecDeque},
     fmt,
     io::{stdout, Write},
     rc::Rc,
@@ -17,11 +18,17 @@ use chrono::Local;
 use futures::{future::FutureExt, select, StreamExt};
 use futures_timer::Delay;
 use tracing::*;
-use tt_rust::ui::glyph::{frame::Frame, label::Label, panel::Panel, AppRequest, Glyph};
+use tt_rust::ui::glyph::{
+    frame::Frame, input::Input, label::Label, panel::Panel, AppRequest, AppResponse, AppResult,
+    Glyph,
+};
 
 use crossterm::{
     cursor::{position, MoveTo},
-    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent},
+    event::{
+        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent,
+        KeyEventKind, KeyModifiers, MouseEvent,
+    },
     execute, queue,
     style::Print,
     terminal::{
@@ -61,32 +68,158 @@ pub fn print_box(w: &mut Box<dyn Write>) -> Result<()> {
     Ok(())
 }
 
-async fn event_loop(w: &mut Box<dyn Write>, _d: &AppData) {
+async fn event_loop(w: &mut Box<dyn Write>, _d: AppData) -> AppData {
+    let mut appdata = _d;
+
     let _ = w.queue(Clear(ClearType::All)).unwrap();
     let mut reader = EventStream::new();
 
-    let mut p = Box::new(Panel::new());
-    let label = Label::new("Text..".to_string());
-    p.add(Box::new(label));
-    let mut f = Frame::new(p);
-    let x = 3;
-    let y = 3;
+    let mut f = appdata.form;
+    let mut x = 0;
+    let mut y = 0;
+    let mut requests: VecDeque<AppRequest> = VecDeque::new();
+    let mut responses: VecDeque<AppResult> = VecDeque::new();
+    for (name, val) in appdata.values.iter() {
+        requests.push_back(AppRequest::SetValue {
+            name: name.clone(),
+            value: val.clone(),
+        });
+    }
+
+    requests.push_back(AppRequest::NextInput(0, 0));
+
     loop {
-        f.write_to(w);
-        w.queue(MoveTo(x, y)).unwrap();
-        w.flush().unwrap();
         if let Some(Ok(r)) = reader.next().await {
-            let _ = f.handle_app_request(&AppRequest::SetValue(format!("{r:?}")));
             match r {
                 Event::Key(KeyEvent {
                     code: KeyCode::Esc, ..
                 }) => break,
-                r => {
-                    let _ = f.handle_term_event(r);
+                Event::Key(KeyEvent {
+                    code: KeyCode::Up,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) => {
+                    if y > 0 {
+                        y -= 1;
+                    }
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Down,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) => {
+                    y += 1;
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Left,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) => {
+                    if x > 0 {
+                        x -= 1;
+                    }
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Right,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) => {
+                    x += 1;
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Enter,
+                    modifiers: KeyModifiers::CONTROL,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) => {
+                    break;
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Enter,
+                    modifiers: KeyModifiers::NONE,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) => requests.push_back(AppRequest::NextInput(x, y)),
+                Event::Mouse(MouseEvent {
+                    kind, column, row, ..
+                }) => match kind {
+                    crossterm::event::MouseEventKind::Down(_) => {
+                        x = column;
+                        y = row;
+                    }
+                    crossterm::event::MouseEventKind::Up(_) => {}
+                    crossterm::event::MouseEventKind::Drag(_) => {}
+                    crossterm::event::MouseEventKind::Moved => {}
+                    crossterm::event::MouseEventKind::ScrollDown => {}
+                    crossterm::event::MouseEventKind::ScrollUp => {}
+                },
+                r => match f.handle_term_event(r) {
+                    Ok(c) => {
+                        responses.push_back(c);
+                    }
+                    Err(_) => {}
+                },
+            }
+
+            while requests.len() > 0 {
+                let req = requests.pop_front().unwrap();
+                trace!("process Request {:?}", &req);
+                if let AppRequest::NextInput(_, _) = req {
+                    if !f.allocated() {
+                        requests.push_front(req);
+                        trace!("request pushed back");
+                        break;
+                    }
+                }
+                if let Ok(result) = f.handle_app_request(&req) {
+                    responses.push_back(result);
                 }
             }
+
+            let mut redraw = false;
+            while responses.len() > 0 {
+                let result = responses.pop_front().unwrap();
+                trace!("process Result: {:?}", result);
+                match result {
+                    AppResult::StringValue(_) => todo!(),
+                    AppResult::Redraw => {
+                        w.queue(MoveTo(x, y)).unwrap();
+                        w.flush().unwrap();
+                        redraw = true;
+                    }
+                    AppResult::InputEnabled => todo!(),
+                    AppResult::NewCursorPosition(new_x, new_y) => {
+                        x = new_x;
+                        y = new_y;
+                        redraw = true;
+                    }
+                    _ => {}
+                }
+            }
+            if redraw {
+                f.write_to(w);
+            }
+            if let Ok(AppResult::InputEnabled) = f.hit(x, y) {
+                // w.queue(crossterm::cursor::Show).unwrap();
+                w.queue(crossterm::cursor::SetCursorStyle::BlinkingBlock)
+                    .unwrap();
+            } else {
+                // w.queue(crossterm::cursor::Hide).unwrap();
+                w.queue(crossterm::cursor::SetCursorStyle::SteadyBar)
+                    .unwrap();
+            }
+            w.queue(MoveTo(x, y)).unwrap();
+            w.flush().unwrap();
         }
     }
+
+    if let Ok(AppResult::Values(vs)) = f.handle_app_request(&AppRequest::CollectAllValues) {
+        appdata.values = vs;
+    } else {
+        error!("no values");
+    }
+    appdata.form = f;
+    appdata
 }
 
 #[allow(dead_code)]
@@ -150,13 +283,16 @@ async fn event_loop2(w: &mut Box<dyn Write>, _d: &AppData) {
 struct AppData {
     // status: TextContent,
     // name: TextContent,
+    form: Box<dyn Glyph>,
+    values: Vec<(String, String)>,
 }
 
 impl AppData {
-    fn new() -> AppData {
-        AppData {
-            // status: TextContent::new("status"),
-            // name: TextContent::new("name"),
+    fn new(form: Box<dyn Glyph>) -> Self {
+        Self {
+            form,
+            values: vec![], // status: TextContent::new("status"),
+                            // name: TextContent::new("name"),
         }
     }
 }
@@ -177,8 +313,25 @@ async fn main() -> Result<()> {
 
     execute!(stdout(), EnableMouseCapture, EnterAlternateScreen)?;
     let w = &mut (Box::new(stdout()) as Box<dyn Write>);
-    let data = AppData::new();
-    event_loop(w, &data).await;
+
+    let mut p = Box::new(Panel::new());
+    let label = Label::new("1".to_string(), "Formular".to_string());
+    p.add(Box::new(label));
+    p.add(Box::new(Label::new("2".to_string(), "Command".to_string())));
+    p.add(Box::new(Input::new("cmd".to_string(), String::new())));
+    p.add(Box::new(Label::new("3".to_string(), "Value 1".to_string())));
+    p.add(Box::new(Input::new("v1".to_string(), String::new())));
+    p.add(Box::new(Label::new("4".to_string(), "Value 2".to_string())));
+    p.add(Box::new(Input::new("v2".to_string(), String::new())));
+    p.add(Box::new(Label::new("5".to_string(), "Value 3".to_string())));
+    p.add(Box::new(Input::new("v3".to_string(), String::new())));
+    let mut data = AppData::new(Box::new(Frame::new(p)));
+
+    data.values = vec![("cmd".to_string(), "Peter".to_string())];
+
+    data = event_loop(w, data).await;
+
+    info!("result: {:#?}", data.values);
 
     execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
 

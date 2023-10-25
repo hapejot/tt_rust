@@ -10,13 +10,15 @@ use super::{
 
 pub struct Label {
     area: Rect,
+    name: String,
     txt: String,
 }
 
 impl Label {
-    pub fn new(txt: String) -> Self {
+    pub fn new(name: String, txt: String) -> Self {
         Self {
             area: Rect::new(),
+            name,
             txt,
         }
     }
@@ -32,13 +34,16 @@ impl Glyph for Label {
         todo!()
     }
 
-    fn resize(&mut self, width: u16, height: u16) {
+    fn resize(&mut self, _width: u16, _height: u16) {
         todo!()
     }
 
-    fn handle_term_event(&mut self, event: crossterm::event::Event) -> bool {
+    fn handle_term_event(
+        &mut self,
+        event: crossterm::event::Event,
+    ) -> std::result::Result<AppResult, AppError> {
         match event {
-            _ => false,
+            _ => Err(AppError::NotRelevant),
         }
     }
 
@@ -48,16 +53,28 @@ impl Glyph for Label {
 
     fn allocate(&mut self, allocation: Rect) {
         self.area = allocation;
-        info!("allocate label to {:?}", &self.area);
+        info!("allocate {:?}", &self.area);
     }
 
     fn handle_app_request(&mut self, req: &AppRequest) -> Result<AppResult, AppError> {
         match req {
-            SetValue(v) => {
-                self.txt = v.clone();
-                Ok(Redraw)
+            SetValue { name, value } => {
+                if name == &self.name {
+                    self.txt = value.clone();
+                    Ok(Redraw)
+                } else {
+                    Err(NotRelevant)
+                }
             }
             _ => Err(NotRelevant),
         }
+    }
+
+    fn hit(&mut self, x: u16, y: u16) -> super::AppResponse {
+        Err(NotRelevant)
+    }
+
+    fn allocated(&self) -> bool {
+        true
     }
 }

@@ -1,7 +1,7 @@
 use crossterm::{cursor::MoveTo, event::Event, style::Print, QueueableCommand};
 use tracing::*;
 
-use super::{Glyph, Rect, AppRequest, AppResult, AppError};
+use super::{AppError, AppRequest, AppResponse, AppResult, Glyph, Rect};
 
 pub struct Frame {
     area: Rect,
@@ -22,7 +22,6 @@ impl Glyph for Frame {
         if self.area.w > 2 && self.area.h > 2 {
             self.content.write_to(w);
             let r = self.area();
-            trace!("write box on {:?}", &r);
             w.queue(MoveTo(r.x, r.y)).unwrap();
             w.queue(Print("┌")).unwrap();
             horizontal_line(r.w - 2, w);
@@ -50,13 +49,16 @@ impl Glyph for Frame {
         self.content.resize(width, height);
     }
 
-    fn handle_term_event(&mut self, r: Event) -> bool {
+    fn handle_term_event(&mut self, r: Event) -> AppResponse {
         match r {
             Event::Resize(w, h) => {
                 self.allocate(super::Rect { x: 0, y: 0, w, h });
-                true
+                Ok(AppResult::Redraw)
             }
-            x => self.content.handle_term_event(x),
+            x => {
+                let r = self.content.handle_term_event(x);
+                r
+            }
         }
     }
 
@@ -65,7 +67,7 @@ impl Glyph for Frame {
     }
 
     fn allocate(&mut self, allocation: super::Rect) {
-        info!("allocated frame to {:?}", &allocation);
+        info!("allocated {:?}", &allocation);
         self.area = allocation.clone();
         self.content.allocate(Rect {
             x: allocation.x + 1,
@@ -77,6 +79,14 @@ impl Glyph for Frame {
 
     fn handle_app_request(&mut self, req: &AppRequest) -> Result<AppResult, AppError> {
         self.content.handle_app_request(req)
+    }
+
+    fn hit(&mut self, x: u16, y: u16) -> super::AppResponse {
+        self.content.hit(x, y)
+    }
+
+    fn allocated(&self) -> bool {
+        self.area.w > 2 && self.area.h > 2
     }
 }
 

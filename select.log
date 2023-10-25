@@ -1,0 +1,15 @@
+2023-10-25T16:45:17.566617Z  INFO tt_rust: starting
+2023-10-25T16:45:17.566949Z  INFO tt_rust::dbx: execute sql: Ok(0)
+2023-10-25T16:45:17.566962Z  INFO tt_rust::dbx: execute sql: Ok(0)
+2023-10-25T16:45:17.567014Z  INFO tt_rust::dbx: execute sql: Ok(0)
+2023-10-25T16:45:17.567036Z  INFO tt_rust::dbx::ser: handle dependencies
+2023-10-25T16:45:17.567054Z  INFO tt_rust::dbx::ser: copy row from:0 to:2
+2023-10-25T16:45:17.567070Z  INFO tt_rust::dbx::ser: field id to personid
+2023-10-25T16:45:17.567075Z  INFO tt_rust::dbx: execute sql: Ok(0)
+2023-10-25T16:45:17.567087Z  INFO tt_rust::dbx::ser: copy row from:0 to:1
+2023-10-25T16:45:17.567095Z  INFO tt_rust::dbx: object <- <id,type>
+2023-10-25T16:45:17.567095Z  INFO tt_rust::dbx::ser: field id to personid
+2023-10-25T16:45:17.567164Z  INFO tt_rust::dbx: update 0 rows.
+2023-10-25T16:45:17.567287Z  INFO tt_rust::dbx: execute sql: Ok(0)
+2023-10-25T16:45:17.567316Z TRACE tt_rust::data: sql:SELECT id,type FROM object WHERE type = ?
+2023-10-25T16:45:17.567349Z TRACE dbx: result: []

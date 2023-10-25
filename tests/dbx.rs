@@ -1,14 +1,30 @@
+use std::collections::BTreeMap;
 
 use serde_derive::Serialize;
+use tracing::*;
 use tt_rust::{
     data::{Query, WhereCondition, WhereExpr},
     dbx::{
-        ser::{CopyRule, CopyRuleLib, FieldMapping}, DatabaseBuilder,
+        ser::{CopyRule, CopyRuleLib, FieldMapping},
+        DBRow, DatabaseBuilder,
     },
 };
 
 #[test]
 fn modify_from() {
+    let db = prepare_database();
+
+    let mut s = DBRow::new();
+    s.set("id", "1".into());
+    s.set("type", "Null".into());
+    // s.set(&String::from("id"), "1".into());
+    // s.set(&String::from("type"), "Nul".into());
+    assert_eq!(s.keys(), vec!["id", "type"]);
+    db.modify_from("object".into(), s);
+    assert!(db.is_connected());
+}
+
+fn prepare_database() -> tt_rust::dbx::Database {
     let mut builder = DatabaseBuilder::new();
     let db = builder
         .table(
@@ -22,23 +38,15 @@ fn modify_from() {
             &["id".into(), "name".into()],
         )
         .build();
-    db.connect();
+    db.connect(None);
     db.activate_structure();
-
-    let mut s = db.new_structure();
-    s.set("id", "1".into());
-    s.set("type", "Null".into());
-    // s.set(&String::from("id"), "1".into());
-    // s.set(&String::from("type"), "Nul".into());
-    assert_eq!(s.keys(), vec!["id", "type"]);
-    db.modify_from("object".into(), s);
-    assert!(db.is_connected());
+    db
 }
 
 #[test]
 fn select() {
-    let db = DatabaseBuilder::new().build();
-    db.connect();
+    tt_rust::init_tracing("select");
+    let db = prepare_database();
 
     let q = Query::new(
         "object",
@@ -46,7 +54,8 @@ fn select() {
         WhereCondition::new().and(WhereExpr::Equals("type".into(), "Null".into())),
     );
 
-    let _res = db.select(q);
+    let res: Vec<BTreeMap<String, String>> = db.select(q);
+    trace!("result: {:?}", res);
 }
 
 #[derive(Debug, Serialize)]
@@ -80,7 +89,6 @@ struct Person {
 }
 
 #[test]
-
 fn serialize() {
     let _crs = CopyRuleLib::new();
     let copy_rule_1 = CopyRule::new(vec![FieldMapping {
@@ -124,7 +132,7 @@ fn serialize() {
         )
         .copy_rule("communications".to_string(), copy_rule_1)
         .build();
-    db.connect();
+    db.connect(None);
 
     db.activate_structure();
 

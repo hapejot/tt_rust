@@ -2,12 +2,16 @@ use std::io::Write;
 
 use crossterm::{
     cursor::MoveTo,
-    event::Event::{self, FocusGained, FocusLost, Key, Mouse, Paste, Resize},
+    event::Event::{self},
     style::Print,
     QueueableCommand,
 };
+use tracing::*;
 
-use super::{AppError, AppRequest, AppResult, Glyph, Rect};
+use super::{
+    AppError::{self, NotRelevant},
+    AppRequest, AppResult, Glyph, Rect,
+};
 
 pub struct Panel {
     area: Rect,
@@ -24,7 +28,6 @@ impl Panel {
     pub fn add(&mut self, g: Box<dyn Glyph>) {
         self.elements.push(g);
     }
-
     fn write_width_markers(&self, w: &mut dyn Write) {
         for i in 1..=self.area.w {
             let label: Vec<char> = format!("{i:03}").chars().collect();
@@ -50,24 +53,21 @@ impl Glyph for Panel {
             h: height,
         };
     }
-
     fn write_to(&self, w: &mut dyn Write) {
         for x in self.elements.iter() {
             x.write_to(w);
         }
     }
-
     fn area(&self) -> super::Rect {
         self.area.clone()
     }
-
-    fn handle_term_event(&mut self, event: Event) -> bool {
+    fn handle_term_event(&mut self, event: Event) -> std::result::Result<AppResult, AppError> {
         match event {
             r => {
-                let mut handled = false;
+                let mut handled = Err(AppError::NotRelevant);
                 for x in self.elements.iter_mut() {
                     handled = x.handle_term_event(r.clone());
-                    if handled {
+                    if handled.is_ok() {
                         break;
                     }
                 }
@@ -80,6 +80,7 @@ impl Glyph for Panel {
     }
     fn allocate(&mut self, allocation: Rect) {
         self.area = allocation.clone();
+        info!("allocate {:?}", self.area);
         let mut y = self.area.y;
         for x in self.elements.iter_mut() {
             x.allocate(Rect {
@@ -91,15 +92,46 @@ impl Glyph for Panel {
             y += 1;
         }
     }
-
     fn handle_app_request(&mut self, req: &AppRequest) -> Result<AppResult, AppError> {
-        let mut r = Err(super::AppError::NotRelevant);
+        let mut result = Err(NotRelevant);
         for x in self.elements.iter_mut() {
-            r = x.handle_app_request(req);
-            if r.is_ok() {
-                break;
+            let r = x.handle_app_request(req);
+            if let Ok(res) = r {
+                match res {
+                    AppResult::Values(vs) => {
+                        if let Ok(AppResult::Values(old_vs)) = result {
+                            result = Ok(AppResult::Values(
+                                old_vs
+                                    .into_iter()
+                                    .chain(vs.into_iter())
+                                    .collect(),
+                            ));
+                        }
+                        else {
+                            result = Ok(AppResult::Values(vs));
+                        }
+                    }
+                    _ => {
+                        result = Ok(res);
+                        break;
+                    }
+                }
+            }
+        }
+        result
+    }
+    fn hit(&mut self, x: u16, y: u16) -> super::AppResponse {
+        let mut r = Err(NotRelevant);
+        for el in self.elements.iter_mut() {
+            let el_result = el.hit(x, y);
+            if el_result.is_ok() {
+                r = el_result.clone();
             }
         }
         r
+    }
+
+    fn allocated(&self) -> bool {
+        self.area.w > 0 && self.area.h > 0
     }
 }
