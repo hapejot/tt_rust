@@ -90,14 +90,9 @@ mod testing {
             (), // empty list of parameters.
         )
         .unwrap();
-        let me = Person {
-            id: 0,
-            name: Some("Steven".to_string()),
-            data: Some(vec![1,2,3]),
-        };
         conn.execute(
             "INSERT INTO person (name, data) VALUES (?1, ?2)",
-            (&me.name, &me.data),
+            ("Steven", vec![1,2,3]),
         )
         .unwrap();
         conn

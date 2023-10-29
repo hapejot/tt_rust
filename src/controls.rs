@@ -17,7 +17,7 @@ pub enum Value {
 
 
 impl Value {
-    fn newLiteral(x: &'static str) -> Value{
+    fn new_literal(x: &'static str) -> Value{
         Value::Literal(x)
     }
 }

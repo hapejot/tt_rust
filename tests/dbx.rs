@@ -3,50 +3,46 @@ use std::collections::BTreeMap;
 use serde_derive::Serialize;
 use tracing::*;
 use tt_rust::{
-    data::{Query, WhereCondition, WhereExpr},
+    data::{
+        model::{DataModel, Table},
+        Query, WhereCondition, WhereExpr,
+    },
     dbx::{
-        ser::{CopyRule, CopyRuleLib, FieldMapping},
-        DBRow, DatabaseBuilder,
+        ser::{CopyRule, CopyRuleLib, FieldCopyRule},
+        DBRow, Database, DatabaseBuilder,
     },
 };
 
 #[test]
 fn modify_from() {
-    let db = prepare_database();
+    let db = prepare_database_object();
 
     let mut s = DBRow::new();
     s.set("id", "1".into());
     s.set("type", "Null".into());
-    // s.set(&String::from("id"), "1".into());
-    // s.set(&String::from("type"), "Nul".into());
     assert_eq!(s.keys(), vec!["id", "type"]);
-    db.modify_from("object".into(), s);
+    db.modify_from("object".into(), &s);
     assert!(db.is_connected());
 }
 
-fn prepare_database() -> tt_rust::dbx::Database {
-    let mut builder = DatabaseBuilder::new();
-    let db = builder
-        .table(
-            "object".into(),
-            &["id".into(), "type".into(), "flags".into()],
-            &["id".into()],
-        )
-        .table(
-            "entry".into(),
-            &["id".into(), "objid".into(), "name".into()],
-            &["id".into(), "name".into()],
-        )
-        .build();
+fn prepare_database_object() -> tt_rust::dbx::Database {
+    let model = DataModel::new("object").table(
+        Table::new("object")
+            .field("id", true, "string")
+            .field("type", false, "string")
+            .field("flags", false, "string"),
+    );
+
+    let builder = DatabaseBuilder::new();
+    let db = builder.build();
     db.connect(None);
-    db.activate_structure();
+    db.activate_structure(model);
     db
 }
 
 #[test]
 fn select() {
-    tt_rust::init_tracing("select");
-    let db = prepare_database();
+    let db = prepare_database_object();
 
     let q = Query::new(
         "object",
@@ -83,18 +79,13 @@ struct Person {
     name1: String,
     name2: String,
     communications: Vec<Communication>,
-    #[serde(rename = "adelstitle")]
     name3: Option<String>,
     name4: Option<String>,
 }
 
 #[test]
 fn serialize() {
-    let _crs = CopyRuleLib::new();
-    let copy_rule_1 = CopyRule::new(vec![FieldMapping {
-        source: "id".to_string(),
-        target: "personid".to_string(),
-    }]);
+    tt_rust::init_tracing("test");
 
     let p = Person {
         name1: "Peter".to_string(),
@@ -118,24 +109,62 @@ fn serialize() {
         id: None,
     };
 
-    let mut builder = DatabaseBuilder::new();
-    let db = builder
-        .table(
-            "person".into(),
-            &[
-                "name1".to_string(),
-                "name2".to_string(),
-                "adelstitle".to_string(),
-                "name4".to_string(),
-            ],
-            &["name1".to_string()],
-        )
-        .copy_rule("communications".to_string(), copy_rule_1)
-        .build();
-    db.connect(None);
-
-    db.activate_structure();
+    let db = prepare_person_db();
+    assert!(db.is_connected());
 
     db.modify_from_ser(&p).unwrap();
-    assert!(db.is_connected());
+    let res = db.execute_query("select * from person");
+    assert_eq!(1, res.len());
+}
+
+fn prepare_person_db() -> tt_rust::dbx::Database {
+    let mut builder = DatabaseBuilder::new();
+    let copy_rule_1 = CopyRule::new(vec![FieldCopyRule {
+        source: "id".to_string(),
+        target: "personid".to_string(),
+    }]);
+    let model = make_person_model();
+    let db = builder.build();
+    db.connect(None);
+
+    db.activate_structure(model);
+    db
+}
+
+fn make_person_model() -> DataModel {
+    let mut model = DataModel::new("Person");
+    let mut tab = Table::new("person")
+        .field("id", true, "string")
+        .field("name1", false, "string")
+        .field("name2", false, "string")
+        .field("name3", false, "string")
+        .field("name4", false, "string");
+    model = model
+        .table(tab)
+        .table(
+            Table::new("email")
+                .field("id", true, "string")
+                .field("personid", false, "string")
+                .field("role", false, "string")
+                .field("address", false, "string"),
+        )
+        .table(
+            Table::new("phone")
+                .field("id", true, "string")
+                .field("personid", false, "string")
+                .field("role", false, "string")
+                .field("number", false, "string"),
+        );
+    model
+}
+
+#[test]
+fn test_new_model() {
+    let model = make_person_model();
+    let db = Database::new();
+    db.connect(None);
+    db.activate_structure(model);
+    for t in db.tables() {
+        info!("table: {}", t);
+    }
 }

@@ -1,3 +1,6 @@
+pub mod model;
+
+
 use std::clone::Clone;
 use std::collections::BTreeMap;
 use std::fmt::Write;
