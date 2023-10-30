@@ -1216,8 +1216,8 @@ impl SerializeStruct for DBRowSerializer {
         match value.serialize(s).unwrap() {
             SerElement::Value(v) => self.rows[0].insert(key.to_string(), v),
             SerElement::Sequence(seq) => {
-                for x in seq.iter() {
-                    info!("{:}", x);
+                for x in seq {
+                    self.rows.push(x);
                 }
             }
             SerElement::Row(_) => todo!(),
@@ -1246,6 +1246,7 @@ impl SerializeStructVariant for DBRowSerializer {
         match value.serialize(s).unwrap() {
             SerElement::Value(v) => self.rows[0].insert(key.to_string(), v),
             SerElement::Sequence(seq) => {
+                todo!("sequence b");
                 for x in seq {
                     self.rows.push(x);
                 }
@@ -1476,6 +1477,13 @@ mod testing {
         name: String,
         gender: Gender,
         age: u8,
+        communications: Vec<Communication>,
+    }
+
+    #[derive(Serialize)]
+    struct Communication {
+        role: String,
+        address: String,
     }
 
     #[test]
@@ -1484,6 +1492,10 @@ mod testing {
             name: "Peter Jaeckel".into(),
             gender: Gender::Male,
             age: 53,
+            communications: vec![
+                Communication{ role: "email".into(), address: "a@bc.de".into() },
+                Communication{ role: "phone".into(), address: "123456".into() },
+            ],
         };
 
         let rs = crate::dbx::ser::serialize_row(p);
