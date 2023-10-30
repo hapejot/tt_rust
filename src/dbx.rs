@@ -6,6 +6,7 @@ use rusqlite::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::{Display, Write},
+    rc::Rc,
     sync::{Arc, Mutex, MutexGuard},
 };
 use tracing::*;
@@ -167,6 +168,7 @@ impl Display for DBRow {
 #[derive(Clone)]
 pub struct Database {
     arc: Arc<DatabaseGuarded>,
+    model: Option<Rc<DataModel>>,
 }
 
 pub struct DatabaseGuarded {
@@ -202,10 +204,10 @@ pub struct DBTable {
 #[derive(Debug)]
 pub struct DataDictionary {}
 
-#[derive(Debug)]
 pub struct DatabaseImpl {
     con: Option<Connection>,
     tables: Vec<DBTable>,
+    model: Option<Rc<DataModel>>,
 }
 
 impl DBTable {
@@ -247,9 +249,11 @@ impl DBTable {
 impl Database {
     pub fn new() -> Self {
         Self {
+            model: None,
             arc: Arc::new(DatabaseGuarded {
                 mutex: Mutex::new(DatabaseImpl {
                     con: None,
+                    model: None,
                     tables: vec![],
                 }),
             }),
@@ -298,9 +302,14 @@ impl Database {
     where
         T: Serialize,
     {
-        let x = ser::serialize_row(value);
-        for r in x {
-            self.modify_from(r.table(), &r);
+        if let Some(model) = {
+            let x = self.locked();
+            x.model.clone()
+        } {
+            let x = ser::serialize_row(model, value);
+            for r in x {
+                self.modify_from(r.table(), &r);
+            }
         }
         Ok(())
     }
@@ -346,16 +355,6 @@ fn build_create_table(t: &Table) -> Result<String, std::fmt::Error> {
     Ok(sql)
 }
 
-impl std::fmt::Debug for Database {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Ok(m) = self.arc.mutex.lock() {
-            (*m).fmt(f)
-        } else {
-            f.debug_struct("Database").field("name", &"value").finish()
-        }
-    }
-}
-
 impl DatabaseBuilder {
     pub fn new() -> Self {
         Self {}
@@ -363,9 +362,11 @@ impl DatabaseBuilder {
 
     pub fn build(&self) -> Database {
         Database {
+            model: None,
             arc: Arc::new(DatabaseGuarded {
                 mutex: Mutex::new(DatabaseImpl {
                     con: None,
+                    model: None,
                     tables: vec![],
                 }),
             }),
@@ -535,12 +536,15 @@ impl DatabaseImpl {
     }
 
     pub fn activate_structure(&mut self, model: DataModel) {
+        self.model = Some(Rc::new(model));
         if let Some(con) = &self.con {
-            for t in model.tables() {
-                info!("activate table {}", t.name());
-                let src = build_create_table(t).unwrap();
-                info!("{}", src);
-                con.execute(src.as_str(), []).unwrap();
+            if let Some(m) = &self.model {
+                for t in m.tables() {
+                    info!("activate table {}", t.name());
+                    let src = build_create_table(t).unwrap();
+                    info!("{}", src);
+                    con.execute(src.as_str(), []).unwrap();
+                }
             }
         }
         self.load_meta();

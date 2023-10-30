@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::{collections::BTreeMap, fmt::Display};
 
 use std::result::Result;
@@ -8,7 +9,7 @@ use serde::ser::{Impossible, SerializeSeq, SerializeStruct, SerializeStructVaria
 use serde::{forward_to_deserialize_any, ser, Serialize};
 use tracing::info;
 
-use crate::data::model::Table;
+use crate::data::model::{DataModel, Table};
 
 use super::{DBRow, SqlValue};
 
@@ -18,11 +19,11 @@ enum SerElement {
     Row(DBRow),
 }
 
-pub fn serialize_row<T>(v: T) -> Vec<crate::dbx::DBRow>
+pub fn serialize_row<T>(model: Rc<DataModel>, v: T) -> Vec<crate::dbx::DBRow>
 where
     T: serde::Serialize,
 {
-    let s = RowSerializer::new();
+    let s = RowSerializer::new(model);
     match v.serialize(&s) {
         Ok(x) => x,
         Err(_) => todo!(),
@@ -979,15 +980,19 @@ impl<'de> ser::Serializer for &NameSerializer {
     }
 }
 
-pub struct RowSerializer {}
+pub struct RowSerializer {
+    model: Rc<DataModel>,
+}
 pub struct DBRowSerializer {
+    model: Rc<DataModel>,
     rows: Vec<DBRow>,
     name: Option<String>,
 }
 
 impl DBRowSerializer {
-    pub fn new(table: &str) -> Self {
+    pub fn new(model: Rc<DataModel>, table: &str) -> Self {
         Self {
+            model,
             rows: vec![DBRow {
                 table: Some(String::from(table)),
                 values: vec![],
@@ -998,8 +1003,8 @@ impl DBRowSerializer {
 }
 
 impl RowSerializer {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(model: Rc<DataModel>) -> Self {
+        Self { model }
     }
 }
 
@@ -1029,7 +1034,7 @@ impl ser::SerializeMap for DBRowSerializer {
     }
 }
 
-struct SQLValueSerializer {}
+struct SQLValueSerializer {model: Rc<DataModel>}
 
 impl ser::Serializer for SQLValueSerializer {
     type Ok = SerElement;
@@ -1151,7 +1156,7 @@ impl ser::Serializer for SQLValueSerializer {
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        Ok(TableSerializer { rows: vec![] })
+        Ok(TableSerializer { model: self.model, rows: vec![] })
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
@@ -1212,7 +1217,7 @@ impl SerializeStruct for DBRowSerializer {
     where
         T: Serialize,
     {
-        let s = SQLValueSerializer {};
+        let s = SQLValueSerializer {model: self.model.clone()};
         match value.serialize(s).unwrap() {
             SerElement::Value(v) => self.rows[0].insert(key.to_string(), v),
             SerElement::Sequence(seq) => {
@@ -1242,7 +1247,7 @@ impl SerializeStructVariant for DBRowSerializer {
     where
         T: Serialize,
     {
-        let s = SQLValueSerializer {};
+        let s = SQLValueSerializer {model: self.model.clone()};
         match value.serialize(s).unwrap() {
             SerElement::Value(v) => self.rows[0].insert(key.to_string(), v),
             SerElement::Sequence(seq) => {
@@ -1406,7 +1411,7 @@ impl<'de> ser::Serializer for &RowSerializer {
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        let s = DBRowSerializer::new("row");
+        let s = DBRowSerializer::new(self.model.clone(), "row");
         Ok(s)
     }
 
@@ -1415,7 +1420,7 @@ impl<'de> ser::Serializer for &RowSerializer {
         name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        let s = DBRowSerializer::new(name);
+        let s = DBRowSerializer::new(self.model.clone(), name);
         Ok(s)
     }
 
@@ -1426,13 +1431,14 @@ impl<'de> ser::Serializer for &RowSerializer {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        let s = DBRowSerializer::new(variant);
+        let s = DBRowSerializer::new(self.model.clone(), variant);
         Ok(s)
     }
 }
 
 struct TableSerializer {
     rows: Vec<DBRow>,
+    model: Rc<DataModel>,
 }
 
 impl SerializeSeq for TableSerializer {
@@ -1443,7 +1449,7 @@ impl SerializeSeq for TableSerializer {
     where
         T: Serialize,
     {
-        let r = serialize_row(value);
+        let r = serialize_row(self.model.clone(), value);
         for x in r {
             self.rows.push(x);
         }
@@ -1457,7 +1463,9 @@ impl SerializeSeq for TableSerializer {
 
 #[cfg(test)]
 mod testing {
-    use crate::dbx::SqlValue;
+    use std::rc::Rc;
+
+    use crate::{dbx::SqlValue, data::model::DataModel};
 
     use super::RowSerializer;
     use rusqlite::ToSql;
@@ -1492,12 +1500,19 @@ mod testing {
             gender: Gender::Male,
             age: 53,
             communications: vec![
-                Communication{ role: "email".into(), address: "a@bc.de".into() },
-                Communication{ role: "phone".into(), address: "123456".into() },
+                Communication {
+                    role: "email".into(),
+                    address: "a@bc.de".into(),
+                },
+                Communication {
+                    role: "phone".into(),
+                    address: "123456".into(),
+                },
             ],
         };
+        let model = DataModel::new("person");
 
-        let rs = crate::dbx::ser::serialize_row(p);
+        let rs = crate::dbx::ser::serialize_row(Rc::new(model), p);
         assert_eq!(3, rs.len());
         let r = &rs[0];
         assert!(String::from(r.get("name").unwrap().clone()) == String::from("Peter Jaeckel"));

@@ -1,0 +1,72 @@
+2023-10-30T23:54:15.260539Z  INFO tt_rust::dbx: activate table person
+2023-10-30T23:54:15.260540Z  INFO tt_rust::dbx: activate table person
+2023-10-30T23:54:15.260538Z  INFO tt_rust::dbx: activate table object
+2023-10-30T23:54:15.260540Z  INFO tt_rust::dbx: activate table object
+2023-10-30T23:54:15.260706Z  INFO tt_rust::dbx: CREATE TABLE object (id string,type string,flags string,primary key (id) );
+2023-10-30T23:54:15.260715Z  INFO tt_rust::dbx: CREATE TABLE object (id string,type string,flags string,primary key (id) );
+2023-10-30T23:54:15.260674Z  INFO tt_rust::dbx: CREATE TABLE person (id string,name1 string,name2 string,name3 string,name4 string,primary key (id) );
+2023-10-30T23:54:15.260660Z  INFO tt_rust::dbx: CREATE TABLE person (id string,name1 string,name2 string,name3 string,name4 string,primary key (id) );
+2023-10-30T23:54:15.260974Z  INFO tt_rust::dbx: activate table email
+2023-10-30T23:54:15.260991Z  INFO tt_rust::dbx: CREATE TABLE email (id string,personid string,role string,address string,primary key (id) );
+2023-10-30T23:54:15.261016Z  INFO tt_rust::dbx: activate table email
+2023-10-30T23:54:15.261038Z  INFO tt_rust::dbx: CREATE TABLE email (id string,personid string,role string,address string,primary key (id) );
+2023-10-30T23:54:15.261048Z  INFO tt_rust::dbx: table: object
+2023-10-30T23:54:15.261060Z  INFO tt_rust::dbx: table: object
+2023-10-30T23:54:15.261084Z TRACE tt_rust::dbx: DBField { name: "id", datatype: "string", default: None, key: true, has_null: true }
+2023-10-30T23:54:15.261102Z TRACE tt_rust::dbx: DBField { name: "id", datatype: "string", default: None, key: true, has_null: true }
+2023-10-30T23:54:15.261110Z TRACE tt_rust::dbx: DBField { name: "type", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261121Z TRACE tt_rust::dbx: DBField { name: "type", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261125Z TRACE tt_rust::dbx: DBField { name: "flags", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261134Z TRACE tt_rust::dbx: DBField { name: "flags", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261146Z  INFO tt_rust::dbx: activate table phone
+2023-10-30T23:54:15.261155Z TRACE tt_rust::data: sql:SELECT id,type FROM object WHERE type = ?
+2023-10-30T23:54:15.261163Z  INFO tt_rust::dbx: CREATE TABLE phone (id string,personid string,role string,number string,primary key (id) );
+2023-10-30T23:54:15.261174Z  INFO tt_rust::dbx: sql upd: UPDATE object SET id = ?,type = ? WHERE id = ?
+2023-10-30T23:54:15.261203Z TRACE dbx: result: []
+2023-10-30T23:54:15.261217Z  INFO tt_rust::dbx: update 0 rows.
+2023-10-30T23:54:15.261301Z  INFO tt_rust::dbx: activate table phone
+2023-10-30T23:54:15.261322Z  INFO tt_rust::dbx: CREATE TABLE phone (id string,personid string,role string,number string,primary key (id) );
+2023-10-30T23:54:15.261357Z  INFO tt_rust::dbx: table: person
+2023-10-30T23:54:15.261394Z TRACE tt_rust::dbx: DBField { name: "id", datatype: "string", default: None, key: true, has_null: true }
+2023-10-30T23:54:15.261408Z TRACE tt_rust::dbx: DBField { name: "name1", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261416Z TRACE tt_rust::dbx: DBField { name: "name2", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261423Z TRACE tt_rust::dbx: DBField { name: "name3", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261430Z TRACE tt_rust::dbx: DBField { name: "name4", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261440Z  INFO tt_rust::dbx: table: email
+2023-10-30T23:54:15.261453Z  INFO tt_rust::dbx: table: person
+2023-10-30T23:54:15.261455Z TRACE tt_rust::dbx: DBField { name: "id", datatype: "string", default: None, key: true, has_null: true }
+2023-10-30T23:54:15.261477Z TRACE tt_rust::dbx: DBField { name: "personid", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261479Z TRACE tt_rust::dbx: DBField { name: "id", datatype: "string", default: None, key: true, has_null: true }
+2023-10-30T23:54:15.261486Z TRACE tt_rust::dbx: DBField { name: "role", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261499Z TRACE tt_rust::dbx: DBField { name: "name1", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261503Z TRACE tt_rust::dbx: DBField { name: "address", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261508Z TRACE tt_rust::dbx: DBField { name: "name2", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261513Z  INFO tt_rust::dbx: table: phone
+2023-10-30T23:54:15.261515Z TRACE tt_rust::dbx: DBField { name: "name3", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261523Z TRACE tt_rust::dbx: DBField { name: "name4", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261528Z TRACE tt_rust::dbx: DBField { name: "id", datatype: "string", default: None, key: true, has_null: true }
+2023-10-30T23:54:15.261533Z  INFO tt_rust::dbx: table: email
+2023-10-30T23:54:15.261537Z TRACE tt_rust::dbx: DBField { name: "personid", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261545Z TRACE tt_rust::dbx: DBField { name: "role", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261547Z TRACE tt_rust::dbx: DBField { name: "id", datatype: "string", default: None, key: true, has_null: true }
+2023-10-30T23:54:15.261552Z TRACE tt_rust::dbx: DBField { name: "number", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261557Z TRACE tt_rust::dbx: DBField { name: "personid", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261564Z TRACE tt_rust::dbx: DBField { name: "role", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261571Z TRACE tt_rust::dbx: DBField { name: "address", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261580Z  INFO tt_rust::dbx: table: phone
+2023-10-30T23:54:15.261582Z  INFO tt_rust::dbx: sql upd: UPDATE person SET id = ?,name1 = ?,name2 = ?,name3 = ?,name4 = ? WHERE id = ?
+2023-10-30T23:54:15.261593Z TRACE tt_rust::dbx: DBField { name: "id", datatype: "string", default: None, key: true, has_null: true }
+2023-10-30T23:54:15.261602Z TRACE tt_rust::dbx: DBField { name: "personid", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261609Z TRACE tt_rust::dbx: DBField { name: "role", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261614Z  INFO tt_rust::dbx: update 0 rows.
+2023-10-30T23:54:15.261616Z TRACE tt_rust::dbx: DBField { name: "number", datatype: "string", default: None, key: false, has_null: true }
+2023-10-30T23:54:15.261633Z  INFO dbx: table: person
+2023-10-30T23:54:15.261639Z  INFO dbx: table: email
+2023-10-30T23:54:15.261644Z  INFO dbx: table: phone
+2023-10-30T23:54:15.261676Z  INFO tt_rust::dbx: sql upd: UPDATE phone SET id = ?,personid = ?,number = ?,role = ? WHERE id = ?
+2023-10-30T23:54:15.261715Z  INFO tt_rust::dbx: update 0 rows.
+2023-10-30T23:54:15.261758Z  INFO tt_rust::dbx: sql upd: UPDATE email SET id = ?,personid = ?,address = ?,role = ? WHERE id = ?
+2023-10-30T23:54:15.261785Z  INFO tt_rust::dbx: update 0 rows.
+2023-10-30T23:54:15.261849Z  INFO dbx: person: <id=782c8ff4-ce87-4651-8a1f-cd0104bcf80b,name1=Peter,name2=Jaeckel,name3=Freiherr,name4=Null>
+2023-10-30T23:54:15.261887Z  INFO dbx: email: <id=270ba0e6-ca32-4883-b9d6-2191560ae1a4,personid=Null,role=dummy,address=a@bc.de>
+2023-10-30T23:54:15.261922Z  INFO dbx: phone: <id=85e72b6f-e425-4b76-bd57-1ca8a6a8655c,personid=Null,role=fake,number=4912345>
