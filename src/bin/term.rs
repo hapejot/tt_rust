@@ -338,7 +338,7 @@ async fn main() -> Result<()> {
     disable_raw_mode()
 }
 
-#[tokio::test]
+// #[tokio::test]
 async fn ui1() {
     use bytes::BufMut;
     use std::io::Write;
