@@ -149,8 +149,15 @@ impl DBRow {
 impl Display for DBRow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut sep = '<';
-        for (name, _) in self.values.iter() {
-            write!(f, "{}{}", sep, name)?;
+        for (name, SqlValue(v)) in self.values.iter() {
+            write!(f, "{}{}=", sep, name)?;
+            match v {
+                Value::Null => write!(f, "Null"),
+                Value::Integer(v) => write!(f, "{}", v),
+                Value::Real(_) => todo!(),
+                Value::Text(v) => write!(f, "{}", v),
+                Value::Blob(_) => todo!(),
+            }?;
             sep = ',';
         }
         write!(f, ">")

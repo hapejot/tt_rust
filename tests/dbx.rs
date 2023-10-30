@@ -11,6 +11,7 @@ use tt_rust::{
         ser::{CopyRule, CopyRuleLib, FieldCopyRule},
         DBRow, Database, DatabaseBuilder,
     },
+    TRACING,
 };
 
 #[test]
@@ -59,23 +60,29 @@ fn select() {
 pub enum Communication {
     #[serde(rename = "phone")]
     Phone {
-        id: Option<usize>,
-        personid: Option<usize>,
+        id: String,
+        personid: Option<String>,
         number: String,
         role: String,
     },
     #[serde(rename = "email")]
     EMail {
-        id: Option<usize>,
-        personid: Option<usize>,
+        id: String,
+        personid: Option<String>,
         address: String,
         role: String,
     },
 }
+
+
+pub fn new_guid() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename = "person")]
 struct Person {
-    id: Option<usize>,
+    id: String,
     name1: String,
     name2: String,
     communications: Vec<Communication>,
@@ -85,7 +92,7 @@ struct Person {
 
 #[test]
 fn serialize() {
-    tt_rust::init_tracing("test");
+    assert!(TRACING.clone());
 
     let p = Person {
         name1: "Peter".to_string(),
@@ -96,17 +103,17 @@ fn serialize() {
             Communication::Phone {
                 number: "+4912345".to_string(),
                 role: "fake".to_string(),
-                id: None,
+                id: new_guid(),
                 personid: None,
             },
             Communication::EMail {
                 address: "a@bc.de".to_string(),
                 role: "dummy".to_string(),
-                id: None,
+                id: new_guid(),
                 personid: None,
             },
         ],
-        id: None,
+        id: new_guid(),
     };
 
     let db = prepare_person_db();
@@ -115,6 +122,22 @@ fn serialize() {
     db.modify_from_ser(&p).unwrap();
     let res = db.execute_query("select * from person");
     assert_eq!(1, res.len());
+    for x in res {
+        info!("person: {}", x);
+    }
+
+    let res = db.execute_query("select * from email");
+    assert_eq!(1, res.len());
+    for x in res {
+        info!("email: {}", x);
+    }
+
+    let res = db.execute_query("select * from phone");
+    assert_eq!(1, res.len());
+    for x in res {
+        info!("phone: {}", x);
+    }
+
 }
 
 fn prepare_person_db() -> tt_rust::dbx::Database {

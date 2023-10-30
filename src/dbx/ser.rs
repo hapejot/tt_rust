@@ -1246,7 +1246,6 @@ impl SerializeStructVariant for DBRowSerializer {
         match value.serialize(s).unwrap() {
             SerElement::Value(v) => self.rows[0].insert(key.to_string(), v),
             SerElement::Sequence(seq) => {
-                todo!("sequence b");
                 for x in seq {
                     self.rows.push(x);
                 }
