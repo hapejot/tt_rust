@@ -38,6 +38,18 @@ impl SqlValue {
     }
 }
 
+impl Display for SqlValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            Value::Null => write!(f, "Null"),
+            Value::Integer(v) => write!(f, "{}", v),
+            Value::Real(v) => write!(f, "{}",v),
+            Value::Text(v) => write!(f, "{}",v),
+            Value::Blob(v) => write!(f, "U8[{}]",v.len()),
+        }
+    }
+}
+
 impl ToSql for SqlValue {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         self.0.to_sql()
