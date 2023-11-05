@@ -7,7 +7,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::{Display, Write},
     rc::Rc,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard}, ops::Index,
 };
 use tracing::*;
 pub mod de;
@@ -105,14 +105,24 @@ impl DBRow {
         }
     }
 
-    pub fn new() -> DBRow {
+    pub fn new(name: &str) -> DBRow {
         DBRow {
-            table: None,
+            table: Some(name.into()),
             values: vec![],
         }
     }
 
     pub fn insert(&mut self, k: String, v: SqlValue) {
+        let mut remove_idx = None;
+        for idx in 0..self.values.len() {
+            if self.values[idx].0 == k {
+                remove_idx = Some(idx);
+                break;
+            }
+        }
+        if let Some(idx) = remove_idx {
+            self.values.remove(idx);
+        }
         self.values.push((k.clone(), v));
     }
 
@@ -161,7 +171,12 @@ impl DBRow {
 
 impl Display for DBRow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut sep = '<';
+        match &self.table {
+            Some(tab_name) => write!(f, "{}(", tab_name),
+            None => write!(f, "("),
+        }?;
+        
+        let mut sep = "";
         for (name, SqlValue(v)) in self.values.iter() {
             write!(f, "{}{}=", sep, name)?;
             match v {
@@ -171,9 +186,9 @@ impl Display for DBRow {
                 Value::Text(v) => write!(f, "{}", v),
                 Value::Blob(_) => todo!(),
             }?;
-            sep = ',';
+            sep = ", ";
         }
-        write!(f, ">")
+        write!(f, ")")
     }
 }
 
@@ -310,7 +325,7 @@ impl Database {
         x.select(q)
     }
 
-    pub fn modify_from_ser<T>(&self, value: &T) -> Result<(), ser::Error>
+    pub fn modify_from_ser<T>(&self, value: &T) -> Result<(), ser::err::Error>
     where
         T: Serialize,
     {
@@ -509,7 +524,7 @@ impl DatabaseImpl {
                         .map(|x| x.to_string())
                         .collect::<Vec<_>>();
                     while let Some(row) = rows.next().unwrap() {
-                        let mut res_row = DBRow::new();
+                        let mut res_row = DBRow::new("#query");
                         for idx in 0..names.len() {
                             let v = Value::from(row.get::<_, Value>(idx).unwrap());
                             res_row.insert(names[idx].clone(), SqlValue(v));

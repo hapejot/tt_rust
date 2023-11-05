@@ -18,7 +18,7 @@ use tt_rust::{
 fn modify_from() {
     let db = prepare_database_object();
 
-    let mut s = DBRow::new();
+    let mut s = DBRow::new("object");
     s.set("id", "1".into());
     s.set("type", "Null".into());
     assert_eq!(s.keys(), vec!["id", "type"]);

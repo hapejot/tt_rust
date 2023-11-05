@@ -1,6 +1,78 @@
+use crate::dbx::ser::{CopyRuleLib, FieldCopyRule};
+
+use self::meta::Meta;
+
+pub mod meta {
+    #[derive(Debug)]
+    pub struct Relation {
+        pub id: String,
+        pub from: String,
+        pub to: String,
+        pub name: String,
+        pub kind: RelationKind,
+        pub fields: Vec<(String, String)>,
+    }
+
+    #[derive(Debug)]
+    pub enum RelationKind {
+        One,
+        Many,
+        ManyMany(String),
+    }
+    pub struct Meta {
+        relations: Vec<Relation>,
+    }
+
+    impl Meta {
+        pub fn new() -> Self {
+            Self { relations: vec![] }
+        }
+
+        pub fn define_relation(
+            &mut self,
+            kind: RelationKind,
+            from: &str,
+            name: &str,
+            to: &str,
+        ) -> String {
+            let id = format!("{}:{}", from, name);
+            self.relations.push(Relation {
+                id: id.clone(),
+                from: from.into(),
+                to: to.into(),
+                name: name.into(),
+                kind,
+                fields: vec![],
+            });
+            id
+        }
+
+        pub fn get_relation(&self, from: &str, name: &str) -> Option<&Relation> {
+            let mut result = None;
+            for x in self.relations.iter() {
+                if x.from == from && x.name == name {
+                    result = Some(x);
+                    break;
+                };
+            }
+            result
+        }
+
+        pub(crate) fn map_field(&mut self, id: &str, from_field: &str, to_field: &str) {
+            for x in self.relations.iter_mut() {
+                if x.id == id {
+                    x.fields.push((from_field.into(), to_field.into()));
+                    break;
+                };
+            }
+        }
+    }
+}
+
 pub struct DataModel {
     name: String,
     tables: Vec<Table>,
+    meta: Meta,
 }
 
 impl DataModel {
@@ -8,6 +80,7 @@ impl DataModel {
         Self {
             name: name.into(),
             tables: vec![],
+            meta: Meta::new(),
         }
     }
 
@@ -22,6 +95,14 @@ impl DataModel {
 
     pub fn name(&self) -> &str {
         self.name.as_str()
+    }
+
+    pub fn meta(&self) -> &Meta {
+        &self.meta
+    }
+
+    pub fn set_meta(&mut self, meta: Meta) {
+        self.meta = meta;
     }
 }
 

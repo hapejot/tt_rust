@@ -1,382 +1,276 @@
-use std::rc::Rc;
-use std::{collections::BTreeMap, fmt::Display};
-
-use std::result::Result;
-
-use futures::io::Empty;
-use rusqlite::types::{Null, Value};
-use rusqlite::ToSql;
-use serde::ser::{Impossible, SerializeSeq, SerializeStruct, SerializeStructVariant};
-use serde::{forward_to_deserialize_any, ser, Serialize};
-use tracing::info;
-
-use crate::data::model::{DataModel, Table};
-
 use super::{DBRow, SqlValue};
-
-enum SerElement {
-    Empty,
-    Value(SqlValue),
-    Sequence(Vec<SerElement>),
-    Row(Vec<(String, SerElement)>),
-}
-
-impl SerElement {}
-
-impl From<SqlValue> for SerElement {
-    fn from(value: SqlValue) -> Self {
-        SerElement::Value(value)
-    }
-}
+use crate::data::model::DataModel;
+use element::SerElement;
+use err::Error;
+use serde::ser::{Impossible, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant};
+use serde::{ser, Serialize};
+use std::collections::BTreeMap;
+use std::rc::Rc;
+use std::result::Result;
+use tracing::info;
 
 pub fn serialize_row<T>(model: Rc<DataModel>, v: T) -> Vec<crate::dbx::DBRow>
 where
     T: serde::Serialize,
 {
-    let s = RowSerializer::new(model);
+    let meta = model.meta();
+    let s = RowSerializer::new(model.clone());
     match &v.serialize(&s) {
-        Ok(x) => x.into(),
+        Ok(x) => x.as_rows(None, &meta),
         Err(_) => todo!(),
     }
 }
 
-impl From<&SerElement> for Vec<DBRow> {
-    fn from(value: &SerElement) -> Self {
-        match value {
-            SerElement::Empty => vec![],
-            SerElement::Value(_) => todo!(),
-            SerElement::Sequence(s) => {
-                let mut result = vec![];
-                for x in s.iter() {
-                    result.push(x.into());
+mod element {
+    use std::fmt::Display;
+
+    use tracing::info;
+
+    use crate::{
+        data::model::meta::{
+            Meta,
+            RelationKind::{Many, ManyMany, One},
+        },
+        dbx::{DBRow, SqlValue},
+    };
+
+    pub enum SerElement {
+        Empty,
+        Value(SqlValue),
+        Sequence(Vec<SerElement>),
+        Row(String, Vec<(String, SerElement)>),
+    }
+
+    impl SerElement {
+        /// converts a SerElement structure to a list of rows ready to be posted to the database.
+        ///
+        pub fn as_rows(&self, context: Option<&str>, meta: &Meta) -> Vec<DBRow> {
+            let mut result = vec![];
+            match (self, context) {
+                (SerElement::Empty, None) => todo!(),
+                (SerElement::Empty, Some(_)) => todo!(),
+                (SerElement::Value(_), None) => todo!(),
+                (SerElement::Value(_), Some(_)) => todo!(),
+                (SerElement::Sequence(_), None) => todo!(),
+                (SerElement::Sequence(s), Some(context)) => {
+                    for x in s {
+                        let mut ss = x.as_rows(Some(context), meta);
+                        result.append(&mut ss);
+                    }
                 }
-                result
+                (SerElement::Row(n, r), None) => {
+                    info!("as rows Row {}", n);
+                    let mut rr = DBRow::new(n.as_str());
+                    for (k, v) in r {
+                        match meta.get_relation(n.as_str(), k.as_str()) {
+                            Some(r) => match r.kind {
+                                One => {
+                                    handle_one_relation(v, &mut rr, k, n, meta, &mut result);
+                                    let sub_row = &result[0];
+                                    for (f_fld, t_fld) in r.fields.iter() {
+                                        info!("field map {} <- {}", f_fld, t_fld);
+                                        rr.insert(
+                                            f_fld.clone(),
+                                            sub_row.get(t_fld).unwrap().clone(),
+                                        );
+                                    }
+                                }
+                                Many => {
+                                    handle_many_relation(v, &mut rr, k, n, meta, &mut result);
+                                    for sub_row in result.iter_mut() {
+                                        for (f_fld, t_fld) in r.fields.iter() {
+                                            info!("field map {} <- {}", t_fld, f_fld);
+                                            sub_row.insert(
+                                                t_fld.clone(),
+                                                rr.get(f_fld).unwrap().clone(),
+                                            );
+                                        }
+                                    }
+                                }
+                                ManyMany(_) => todo!(),
+                            },
+                            None => {
+                                handle_field(v, &mut rr, k, n, meta, &mut result);
+                            }
+                        };
+                    }
+                    result.insert(0, rr);
+                }
+                (SerElement::Row(_, r), Some(n)) => todo!(),
             }
-            SerElement::Row(r) => {
-                let mut res = DBRow::new();
-                for (k, v) in r.iter() {
-                    res.insert(k.clone(), v.into());
+            result
+        }
+    }
+
+    impl Display for SerElement {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SerElement::Empty => write!(f, "Empty"),
+                SerElement::Value(x) => write!(f, "Value({x})"),
+                SerElement::Sequence(s) => {
+                    write!(f, "Sequence(")?;
+                    let mut sep = "";
+                    for x in s {
+                        write!(f, "{}{}", sep, x)?;
+                        sep = ", ";
+                    }
+                    write!(f, ")")
                 }
-                vec![res]
+                SerElement::Row(name, values) => {
+                    write!(f, "{}(", name)?;
+                    let mut sep = "";
+                    for (k, v) in values {
+                        write!(f, "{}{}={}", sep, k, v)?;
+                        sep = ", ";
+                    }
+                    write!(f, ")")
+                }
+            }
+        }
+    }
+
+    fn handle_field(
+        v: &SerElement,
+        rr: &mut DBRow,
+        k: &String,
+        n: &String,
+        meta: &Meta,
+        result: &mut Vec<DBRow>,
+    ) {
+        match v {
+            SerElement::Empty => rr.insert(k.clone(), SqlValue(rusqlite::types::Value::Null)),
+            SerElement::Value(v) => rr.insert(k.clone(), v.clone()),
+            SerElement::Sequence(v) => {
+                info!("sub row sequence {}.{}", n, k);
+                for x in v {
+                    let mut rr = x.as_rows(None, meta);
+                    result.append(&mut rr);
+                }
+            }
+            SerElement::Row(n, _) => {
+                info!("sub row {}.{}", n, k);
+                let mut rr = v.as_rows(None, meta);
+                result.append(&mut rr);
+            }
+        }
+    }
+
+    fn handle_one_relation(
+        v: &SerElement,
+        rr: &mut DBRow,
+        k: &String,
+        n: &String,
+        meta: &Meta,
+        result: &mut Vec<DBRow>,
+    ) {
+        match v {
+            SerElement::Empty => todo!("implement empty relationship"),
+            SerElement::Value(v) => panic!("relation cannot use atomic values"),
+            SerElement::Sequence(v) => panic!("one relations cannot refer to vectors"),
+            SerElement::Row(n, _) => {
+                let mut rr = v.as_rows(None, meta);
+                result.append(&mut rr);
+            }
+        }
+    }
+
+    fn handle_many_relation(
+        v: &SerElement,
+        rr: &mut DBRow,
+        k: &String,
+        n: &String,
+        meta: &Meta,
+        result: &mut Vec<DBRow>,
+    ) {
+        info!("handle many relation {} {}", k, n);
+        match v {
+            SerElement::Empty => todo!("implement empty relationship"),
+            SerElement::Value(v) => panic!("relation cannot use atomic values"),
+            SerElement::Sequence(v) => {
+                for x in v {
+                    info!("many: handle row {}", x);
+                    let mut rr = x.as_rows(None, meta);
+                    result.append(&mut rr);
+                }
+            }
+            SerElement::Row(n, _) => {
+                let mut rr = v.as_rows(None, meta);
+                result.append(&mut rr);
+            }
+        }
+    }
+
+    impl From<SqlValue> for SerElement {
+        fn from(value: SqlValue) -> Self {
+            SerElement::Value(value)
+        }
+    }
+
+    impl From<&SerElement> for SqlValue {
+        fn from(value: &SerElement) -> Self {
+            match value {
+                SerElement::Empty => todo!(),
+                SerElement::Value(v) => v.clone(),
+                SerElement::Sequence(_) => todo!(),
+                SerElement::Row(_, _) => todo!(),
             }
         }
     }
 }
-
-impl From<&SerElement> for DBRow {
-    fn from(value: &SerElement) -> Self {
-        match value {
-            SerElement::Empty => todo!(),
-            SerElement::Value(v) => panic!("cannot convert {} into a row", v),
-            SerElement::Sequence(_) => todo!(),
-            SerElement::Row(fs) => {
-                let mut result = DBRow::new();
-                for (k, v) in fs.iter() {
-                    result.insert(k.clone(), v.into());
-                }
-                result
-            }
-        }
-    }
-}
-
-impl From<&SerElement> for SqlValue {
-    fn from(value: &SerElement) -> Self {
-        todo!()
-    }
-}
-
 pub fn serialize_row_with_default<T>(model: Rc<DataModel>, default: DBRow, v: T) -> Vec<DBRow>
 where
     T: serde::Serialize,
 {
-    let mut s = RowSerializer::new(model);
+    let cr = model.meta();
+    let mut s = RowSerializer::new(model.clone());
     s.with_default(default);
     match &v.serialize(&s) {
-        Ok(x) => x.into(),
+        Ok(x) => x.as_rows(None, &cr),
         Err(_) => todo!(),
     }
 }
 
-#[derive(Debug)]
-pub enum Error {
-    Generic(String),
-}
+pub mod err {
+    use std::fmt::Display;
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Generic(msg) => write!(f, "sql ser error: {}", msg),
-        }
-    }
-}
+    use serde::ser;
 
-impl ser::StdError for Error {
-    fn source(&self) -> Option<&(dyn ser::StdError + 'static)> {
-        None
+    #[derive(Debug)]
+    pub enum Error {
+        Generic(String),
     }
 
-    fn description(&self) -> &str {
-        "description() is deprecated; use Display"
-    }
-
-    fn cause(&self) -> Option<&dyn ser::StdError> {
-        self.source()
-    }
-}
-
-impl serde::ser::Error for Error {
-    fn custom<T>(msg: T) -> Self
-    where
-        T: Display,
-    {
-        Error::Generic(format!("{}", msg))
-    }
-}
-
-#[derive(Debug)]
-pub enum Ctx {
-    Main {
-        ty: String,
-        rowidx: usize,
-    },
-    Single {
-        rel: String,
-        ty: String,
-        rowidx: usize,
-        parentrowidx: usize,
-    },
-    Multiple {
-        rel: String,
-        ty: String,
-    },
-}
-
-pub struct Context {
-    rel: Option<String>,
-    stack: Vec<Ctx>,
-    copy_rules: CopyRuleLib,
-    operations: Vec<Operation>,
-    rows: Vec<DBRow>,
-}
-
-impl Context {
-    fn new(copy_rules: CopyRuleLib) -> Self {
-        Self {
-            rel: None,
-            stack: vec![],
-            copy_rules,
-            operations: vec![],
-            rows: vec![],
-        }
-    }
-
-    fn enter(&mut self, ty: String) {
-        let rel = self.rel.clone();
-        match self.stack.last() {
-            Some(x) => match x {
-                Ctx::Main { .. } => self.push_context(&rel, ty),
-                Ctx::Single { .. } => self.push_context(&rel, ty),
-                Ctx::Multiple { rel, .. } => self.push_context(&Some(rel.clone()), ty),
-            },
-            None => self.push_context(&rel, ty),
-        }
-    }
-
-    fn push_context(&mut self, rel: &Option<String>, ty: String) {
-        let rowidx = self.rows.len();
-        self.rows.push(DBRow::new());
-        match rel {
-            Some(rel) => self.stack.push(Ctx::Single {
-                rel: rel.clone(),
-                ty,
-                rowidx,
-                parentrowidx: 0,
-            }),
-            None => self.stack.push(Ctx::Main { ty, rowidx }),
-        }
-    }
-
-    fn enter_vec(&mut self, ty: String) {
-        match &self.rel {
-            Some(rel) => self.stack.push(Ctx::Multiple {
-                rel: rel.clone(),
-                ty,
-            }),
-            None => todo!(),
-        }
-    }
-
-    fn set_relation(&mut self, rel: String) {
-        self.rel = Some(rel)
-    }
-
-    fn get_relationship(&self) -> Option<Relationship> {
-        match self.stack.last() {
-            Some(x) => match x {
-                Ctx::Main { .. } => None,
-                Ctx::Single { rel, .. } => Some(Relationship { name: rel.clone() }),
-                Ctx::Multiple { rel, .. } => Some(Relationship { name: rel.clone() }),
-            },
-            None => todo!(),
-        }
-    }
-
-    fn leave(&mut self) {
-        match self.stack.pop().unwrap() {
-            Ctx::Main { ty, rowidx } => self.operations.insert(
-                0,
-                Operation {
-                    index: rowidx,
-                    table: ty,
-                    depends: vec![],
-                    done: false,
-                },
-            ),
-            Ctx::Single {
-                rel,
-                ty,
-                rowidx,
-                parentrowidx,
-            } => {
-                let copy_rule = self.copy_rules.get(&rel);
-                if let Some(cr) = copy_rule {
-                    self.operations.insert(
-                        0,
-                        Operation {
-                            index: rowidx,
-                            table: ty,
-                            done: false,
-                            depends: vec![Dependency {
-                                record_number: parentrowidx,
-                                copy_rule: cr.clone(),
-                            }],
-                        },
-                    );
-                    if let Some(m2m) = &cr.many_to_many {
-                        let many_to_many_idx = self.rows.len();
-                        self.rows.push(DBRow::new());
-                        self.operations.insert(
-                            1,
-                            Operation {
-                                index: many_to_many_idx,
-                                table: m2m.name.clone(),
-                                done: false,
-                                depends: vec![
-                                    Dependency {
-                                        record_number: parentrowidx,
-                                        copy_rule: m2m.copy1.clone(),
-                                    },
-                                    Dependency {
-                                        record_number: rowidx,
-                                        copy_rule: m2m.copy2.clone(),
-                                    },
-                                ],
-                            },
-                        );
-                    }
-                } else {
-                    self.operations.insert(
-                        0,
-                        Operation {
-                            index: rowidx,
-                            table: ty,
-                            depends: vec![],
-                            done: false,
-                        },
-                    )
-                }
-            }
-            Ctx::Multiple { .. } => {}
-        };
-    }
-
-    fn set_value<T: Into<SqlValue>>(&mut self, k: String, v: T) {
-        match self.stack.last() {
-            Some(curr) => match curr {
-                Ctx::Main { ty: _r, rowidx } => {
-                    let row = self.rows.get_mut(*rowidx).unwrap();
-                    row.insert(k, v.into());
-                }
-                Ctx::Single { rowidx, .. } => {
-                    let row = self.rows.get_mut(*rowidx).unwrap();
-                    row.insert(k, v.into());
-                }
-                Ctx::Multiple { .. } => todo!(),
-            },
-            None => todo!(),
-        }
-    }
-
-    pub(crate) fn get_row(&self, index: usize) -> &DBRow {
-        self.rows.get(index).unwrap()
-    }
-
-    pub fn get_row_mut(&mut self, index: usize) -> &mut DBRow {
-        self.rows.get_mut(index).unwrap()
-    }
-
-    fn get_operation(&self, n: usize) -> &Operation {
-        if let Some(op) = self.operations.get(n) {
-            op
-        } else {
-            panic!("no operation at index {}", n);
-        }
-    }
-
-    /// loop through all the operations and apply the copy rules
-    fn perform_copy_rules(&mut self) {
-        let work_list = self.prepare_work_list_for_copy_rules();
-
-        for (source, target, rule) in work_list {
-            self.copy_rows(source, target, rule);
-        }
-    }
-
-    fn prepare_work_list_for_copy_rules(&mut self) -> Vec<(usize, usize, CopyRule)> {
-        let work_list = {
-            let ops = self.get_operations();
-            let mut work = vec![];
-            for x in ops {
-                let Operation { index, depends, .. } = x;
-                for dep in depends {
-                    work.push((dep.record_number, *index, dep.copy_rule.clone()));
-                }
-            }
-            work
-        };
-        work_list
-    }
-
-    fn get_operations(&self) -> Vec<&Operation> {
-        self.operations
-            .iter()
-            .map(|x| x)
-            .collect::<Vec<&Operation>>()
-    }
-
-    fn copy_rows(&mut self, from: usize, to: usize, copy_rule: CopyRule) {
-        info!("copy row from:{} to:{}", from, to);
-        let source_row = self.get_row(from).clone();
-        let target_row = self.get_row_mut(to);
-        let fmap = &copy_rule.field_mappings;
-        if fmap.len() == 0 {
-        } else {
-            for FieldCopyRule { source, target } in copy_rule.field_mappings.iter() {
-                info!("field {} to {}", source, target);
-                if let Some(v) = source_row.get(source) {
-                    target_row.insert(target.clone(), v.clone());
-                }
+    impl std::fmt::Display for Error {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Error::Generic(msg) => write!(f, "sql ser error: {}", msg),
             }
         }
     }
-}
 
-#[derive(Debug, Clone)]
-struct Relationship {
-    name: String,
-}
+    impl ser::StdError for Error {
+        fn source(&self) -> Option<&(dyn ser::StdError + 'static)> {
+            None
+        }
 
+        fn description(&self) -> &str {
+            "description() is deprecated; use Display"
+        }
+
+        fn cause(&self) -> Option<&dyn ser::StdError> {
+            self.source()
+        }
+    }
+
+    impl serde::ser::Error for Error {
+        fn custom<T>(msg: T) -> Self
+        where
+            T: Display,
+        {
+            Error::Generic(format!("{}", msg))
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub struct CopyRuleLib {
     rules: BTreeMap<String, CopyRule>,
@@ -388,8 +282,8 @@ impl CopyRuleLib {
             rules: BTreeMap::new(),
         }
     }
-    pub fn add(&mut self, name: String, rule: CopyRule) {
-        self.rules.insert(name, rule);
+    pub fn add(&mut self, name: &str, rule: CopyRule) {
+        self.rules.insert(name.into(), rule);
     }
 
     fn get(&self, rel: &String) -> Option<&CopyRule> {
@@ -454,430 +348,6 @@ struct Dependency {
     copy_rule: CopyRule,
 }
 
-#[derive(Debug)]
-pub struct Operation {
-    index: usize,
-    done: bool,
-    table: String,
-    depends: Vec<Dependency>,
-}
-impl Operation {
-    pub(crate) fn get_index(&self) -> usize {
-        self.index
-    }
-
-    pub(crate) fn get_table(&self) -> String {
-        self.table.clone()
-    }
-}
-
-pub struct SqlSerializer {
-    pub counter: usize,
-    pub tab_name: String,
-    pub current_field: Option<String>,
-    pub row: DBRow,
-    // pub operations: Vec<Operation>,
-    // pub stack: Vec<Operation>,
-    pub context: Context,
-}
-
-impl<'a> ser::Serializer for &'a mut SqlSerializer {
-    type Ok = ();
-    type Error = Error;
-    type SerializeSeq = Self;
-    type SerializeTuple = Self;
-    type SerializeTupleStruct = Self;
-    type SerializeTupleVariant = Self;
-    type SerializeMap = Self;
-    type SerializeStruct = Self;
-    type SerializeStructVariant = Self;
-
-    fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        self.post_value(v)
-    }
-
-    fn serialize_i8(self, _v: i8) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_i16(self, _v: i16) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_i32(self, _v: i32) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_i64(self, _v: i64) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_u8(self, _v: u8) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_u16(self, _v: u16) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_u32(self, _v: u32) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        self.post_value(v)
-    }
-
-    fn serialize_f32(self, _v: f32) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_f64(self, _v: f64) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_char(self, _v: char) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        if let Some(field) = &self.current_field {
-            self.context.set_value(field.clone(), v);
-        }
-        // else it is no atomic value, instead
-        Ok(())
-    }
-
-    fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        if let Some(field) = &self.current_field {
-            self.context.set_value(field.clone(), Value::Null);
-            self.current_field = None;
-        }
-        Ok(())
-    }
-
-    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
-    where
-        T: Serialize,
-    {
-        value.serialize(self)
-    }
-
-    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_unit_variant(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-    ) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_newtype_struct<T: ?Sized>(
-        self,
-        _name: &'static str,
-        _value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: Serialize,
-    {
-        todo!()
-    }
-
-    fn serialize_newtype_variant<T: ?Sized>(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-        _value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: Serialize,
-    {
-        todo!()
-    }
-
-    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        // self.current_field = None;
-        if let Some(name) = &self.current_field {
-            self.context.set_relation(name.clone());
-            self.context.enter_vec("vec".to_string());
-        }
-
-        Ok(self)
-    }
-
-    fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_tuple_struct(
-        self,
-        _name: &'static str,
-        _len: usize,
-    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_tuple_variant(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-        _len: usize,
-    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        todo!()
-    }
-
-    fn serialize_struct(
-        self,
-        name: &'static str,
-        _len: usize,
-    ) -> Result<Self::SerializeStruct, Self::Error> {
-        self.tab_name = String::from(name);
-        self.enter(name);
-        if let Some(name) = &self.current_field {
-            self.context.set_relation(name.clone());
-        }
-        self.context.enter(name.to_string());
-        Ok(self)
-    }
-
-    fn serialize_struct_variant(
-        self,
-        name: &'static str,
-        _variant_index: u32,
-        variant: &'static str,
-        _len: usize,
-    ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        self.enter(name);
-        if let Some(name) = &self.current_field {
-            self.context.set_relation(name.clone());
-        }
-        self.context.enter(variant.to_string());
-        Ok(self)
-    }
-}
-
-impl SqlSerializer {
-    pub fn new(copy_rules: CopyRuleLib) -> Self {
-        Self {
-            counter: 1,
-            tab_name: String::new(),
-            row: DBRow::new(),
-            current_field: None,
-            // operations: vec![],
-            // stack: vec![],
-            context: Context::new(copy_rules),
-        }
-    }
-
-    fn enter(&mut self, _name: &str) {
-        // let op = Operation {
-        //     index: self.counter,
-        //     table: String::from(name),
-        //     depends: None,
-        // };
-        self.counter += 1;
-        // self.stack.push(op);
-    }
-
-    fn exit(&mut self) {
-        // let op = self.stack.pop().unwrap();
-        // self.operations.push(op);
-    }
-
-    fn post_value<T: Into<SqlValue>>(&mut self, v: T) -> Result<(), Error> {
-        if let Some(field) = &self.current_field {
-            self.context.set_value(field.clone(), v);
-            self.current_field = None;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn get_operations(&self) -> Vec<&Operation> {
-        let result = self.context.operations.iter().collect();
-        result
-    }
-
-    fn get_operation(&self, n: usize) -> &Operation {
-        let r = self.context.get_operation(n);
-        r
-    }
-
-    pub(crate) fn perform_copy_rules(&mut self) {
-        info!("handle dependencies");
-        self.context.perform_copy_rules();
-    }
-}
-
-impl<'a> ser::SerializeSeq for &'a mut SqlSerializer {
-    type Ok = ();
-    type Error = Error;
-
-    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: Serialize,
-    {
-        value.serialize(&mut **self)
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        self.context.leave();
-        Ok(())
-    }
-}
-
-impl<'a> ser::SerializeTuple for &'a mut SqlSerializer {
-    type Ok = ();
-    type Error = Error;
-
-    fn serialize_element<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
-    where
-        T: Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-}
-impl<'a> ser::SerializeTupleStruct for &'a mut SqlSerializer {
-    type Ok = ();
-    type Error = Error;
-
-    fn serialize_field<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
-    where
-        T: Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-}
-
-impl<'a> ser::SerializeTupleVariant for &'a mut SqlSerializer {
-    type Ok = ();
-    type Error = Error;
-
-    fn serialize_field<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
-    where
-        T: Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-}
-impl<'a> ser::SerializeMap for &'a mut SqlSerializer {
-    type Ok = ();
-
-    type Error = Error;
-
-    fn serialize_key<T: ?Sized>(&mut self, _key: &T) -> Result<(), Self::Error>
-    where
-        T: Serialize,
-    {
-        todo!()
-    }
-
-    fn serialize_value<T: ?Sized>(&mut self, _value: &T) -> Result<(), Self::Error>
-    where
-        T: Serialize,
-    {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
-    }
-}
-
-impl<'a> ser::SerializeStruct for &'a mut SqlSerializer {
-    type Ok = ();
-
-    type Error = Error;
-
-    fn serialize_field<T: ?Sized>(
-        &mut self,
-        key: &'static str,
-        value: &T,
-    ) -> Result<(), Self::Error>
-    where
-        T: Serialize,
-    {
-        self.current_field = Some(String::from(key));
-        value.serialize(&mut **self).unwrap();
-        Ok(())
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        println!("done with whatever");
-        self.exit();
-        self.context.leave();
-        Ok(())
-    }
-}
-
-impl<'a> ser::SerializeStructVariant for &'a mut SqlSerializer {
-    type Ok = ();
-
-    type Error = Error;
-
-    fn serialize_field<T: ?Sized>(
-        &mut self,
-        key: &'static str,
-        value: &T,
-    ) -> Result<(), Self::Error>
-    where
-        T: Serialize,
-    {
-        self.current_field = Some(String::from(key));
-        value.serialize(&mut **self)
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        self.exit();
-        self.context.leave();
-        Ok(())
-    }
-}
-
-#[test]
-fn context() {
-    let mut c = Context::new(CopyRuleLib::new());
-    c.enter("S1".to_string());
-    c.set_relation("r1".to_string());
-    c.enter("S3".to_string());
-    c.set_relation("r3".to_string());
-    c.enter_vec("V".to_string());
-    c.set_relation("r2".to_string());
-    c.enter("S2".to_string());
-    c.leave();
-    c.leave();
-    c.leave();
-}
-
 pub struct NameSerializer {}
 
 impl<'de> ser::Serializer for &NameSerializer {
@@ -940,7 +410,7 @@ impl<'de> ser::Serializer for &NameSerializer {
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(v.to_string())
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
@@ -1054,21 +524,72 @@ struct RowSerializer {
 }
 struct DBRowSerializer {
     model: Rc<DataModel>,
-    result: SerElement,
+    result: Vec<(String, SerElement)>,
     name: Option<String>,
 }
 
 impl DBRowSerializer {
-    pub fn new(model: Rc<DataModel>, default: DBRow) -> Self {
+    pub fn new(model: Rc<DataModel>, name: &str) -> Self {
         Self {
             model,
-            result: SerElement::Empty,
-            name: None,
+            result: vec![],
+            name: Some(name.into()),
         }
     }
 
     pub fn get_default_values() -> Vec<(String, SqlValue)> {
         vec![]
+    }
+}
+impl SerializeStruct for DBRowSerializer {
+    type Ok = SerElement;
+
+    type Error = Error;
+
+    fn serialize_field<T: ?Sized>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), Self::Error>
+    where
+        T: Serialize,
+    {
+        info!("serialize {}", key);
+        let s = SQLValueSerializer {
+            model: self.model.clone(),
+            name: Some(key.into()),
+        };
+        self.result.push((key.into(), value.serialize(s).unwrap()));
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(SerElement::Row(self.name.unwrap(), self.result))
+    }
+}
+
+impl SerializeStructVariant for DBRowSerializer {
+    type Ok = SerElement;
+    type Error = Error;
+
+    fn serialize_field<T: ?Sized>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), Self::Error>
+    where
+        T: Serialize,
+    {
+        let s = SQLValueSerializer {
+            model: self.model.clone(),
+            name: Some(key.into()),
+        };
+        self.result.push((key.into(), value.serialize(s).unwrap()));
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(SerElement::Row(self.name.unwrap(), self.result))
     }
 }
 
@@ -1077,13 +598,6 @@ impl RowSerializer {
         Self {
             model,
             default: None,
-        }
-    }
-
-    fn default_row(&self, table: &str) -> DBRow {
-        DBRow {
-            table: Some(String::from(table)),
-            values: vec![],
         }
     }
 
@@ -1102,7 +616,6 @@ impl ser::SerializeMap for DBRowSerializer {
     {
         let s = NameSerializer {};
         let n = key.serialize(&s).unwrap();
-        self.name = Some(n);
         Ok(())
     }
 
@@ -1130,7 +643,7 @@ impl ser::Serializer for SQLValueSerializer {
     type SerializeTuple = Impossible<Self::Ok, Self::Error>;
     type SerializeTupleStruct = Impossible<Self::Ok, Self::Error>;
     type SerializeTupleVariant = Impossible<Self::Ok, Self::Error>;
-    type SerializeMap = Impossible<Self::Ok, Self::Error>;
+    type SerializeMap = StructSerializer;
     type SerializeStruct = StructSerializer;
     type SerializeStructVariant = StructSerializer;
 
@@ -1191,7 +704,9 @@ impl ser::Serializer for SQLValueSerializer {
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Ok(SerElement::Value(SqlValue::new::<Option<String>>(None)))
+        Ok(SerElement::Value(SqlValue::new(
+            rusqlite::types::Value::Null,
+        )))
     }
 
     fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
@@ -1273,7 +788,7 @@ impl ser::Serializer for SQLValueSerializer {
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        todo!()
+        Ok(StructSerializer::new(self.model.clone(), None))
     }
 
     fn serialize_struct(
@@ -1296,58 +811,10 @@ impl ser::Serializer for SQLValueSerializer {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        Ok(StructSerializer::new(self.model.clone(), Some(name.into())))
-    }
-}
-
-impl SerializeStruct for DBRowSerializer {
-    type Ok = SerElement;
-
-    type Error = Error;
-
-    fn serialize_field<T: ?Sized>(
-        &mut self,
-        key: &'static str,
-        value: &T,
-    ) -> Result<(), Self::Error>
-    where
-        T: Serialize,
-    {
-        let s = SQLValueSerializer {
-            model: self.model.clone(),
-            name: Some(key.into()),
-        };
-        self.result = value.serialize(s).unwrap();
-        Ok(())
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(self.result)
-    }
-}
-
-impl SerializeStructVariant for DBRowSerializer {
-    type Ok = SerElement;
-    type Error = Error;
-
-    fn serialize_field<T: ?Sized>(
-        &mut self,
-        key: &'static str,
-        value: &T,
-    ) -> Result<(), Self::Error>
-    where
-        T: Serialize,
-    {
-        let s = SQLValueSerializer {
-            model: self.model.clone(),
-            name: Some(key.into()),
-        };
-        self.result = value.serialize(s).unwrap();
-        Ok(())
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(self.result)
+        Ok(StructSerializer::new(
+            self.model.clone(),
+            Some(format!("{}.{}", name, variant)),
+        ))
     }
 }
 
@@ -1497,9 +964,7 @@ impl<'de> ser::Serializer for &RowSerializer {
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        let default = self.default_row("default");
-        let s = DBRowSerializer::new(self.model.clone(), default);
-        Ok(s)
+        todo!();
     }
 
     fn serialize_struct(
@@ -1507,9 +972,8 @@ impl<'de> ser::Serializer for &RowSerializer {
         name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        info!("serialize struct {}", name);
-        let default = self.default_row(name);
-        let s = DBRowSerializer::new(self.model.clone(), default);
+        info!("serialize struct");
+        let s = DBRowSerializer::new(self.model.clone(), name);
         Ok(s)
     }
 
@@ -1520,22 +984,22 @@ impl<'de> ser::Serializer for &RowSerializer {
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        let default = self.default_row(variant);
-        let s = DBRowSerializer::new(self.model.clone(), default);
-        Ok(s)
+        todo!();
     }
 }
 
 struct StructSerializer {
     parent: DBRowSerializer,
+    key: Option<String>,
 }
 
 impl StructSerializer {
     fn new(model: Rc<DataModel>, name: Option<String>) -> Self {
         Self {
+            key: None,
             parent: DBRowSerializer {
                 model,
-                result: SerElement::Empty,
+                result: vec![],
                 name,
             },
         }
@@ -1547,6 +1011,41 @@ impl StructSerializer {
         value: &T,
     ) -> Result<(), Error> {
         SerializeStruct::serialize_field(&mut self.parent, key, value)
+    }
+}
+
+impl SerializeMap for StructSerializer {
+    type Ok = SerElement;
+    type Error = Error;
+
+    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
+    where
+        T: Serialize,
+    {
+        let s = NameSerializer {};
+        self.key = Some(key.serialize(&s).unwrap());
+        Ok(())
+    }
+
+    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: Serialize,
+    {
+        let k = &self.key;
+        if let Some(key) = k {
+            let s = SQLValueSerializer {
+                model: self.parent.model.clone(),
+                name: Some(key.into()),
+            };
+            self.parent
+                .result
+                .push((key.into(), value.serialize(s).unwrap()));
+        };
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(SerElement::Row("map".to_string(), self.parent.result))
     }
 }
 
@@ -1567,7 +1066,10 @@ impl SerializeStruct for StructSerializer {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(self.parent.result)
+        Ok(SerElement::Row(
+            self.parent.name.unwrap(),
+            self.parent.result,
+        ))
     }
 }
 
@@ -1588,7 +1090,10 @@ impl SerializeStructVariant for StructSerializer {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(self.parent.result)
+        Ok(SerElement::Row(
+            self.parent.name.unwrap(),
+            self.parent.result,
+        ))
     }
 }
 
@@ -1606,10 +1111,6 @@ impl SerializeSeq for TableSerializer {
     where
         T: Serialize,
     {
-        let default = DBRow {
-            table: self.name.clone(),
-            values: vec![],
-        };
         let s = SQLValueSerializer {
             model: self.model.clone(),
             name: self.name.clone(),
@@ -1627,13 +1128,24 @@ impl SerializeSeq for TableSerializer {
 
 #[cfg(test)]
 mod testing {
-    use std::rc::Rc;
+    use std::{collections::BTreeMap, rc::Rc};
 
-    use crate::{data::model::DataModel, dbx::SqlValue};
+    use crate::{
+        data::model::{
+            meta::{
+                Meta,
+                RelationKind::{Many, One},
+            },
+            DataModel,
+        },
+        dbx::{ser::CopyRule, SqlValue},
+        TRACING,
+    };
 
     use super::RowSerializer;
     use rusqlite::ToSql;
     use serde_derive::Serialize;
+    use tracing::info;
 
     #[derive(Serialize)]
     enum Gender {
@@ -1645,29 +1157,35 @@ mod testing {
 
     #[derive(Serialize)]
     struct Person {
+        personid: String,
         name: String,
         gender: Gender,
         age: u8,
         communications: Vec<Communication>,
+        identification: BTreeMap<String, String>,
     }
 
     #[derive(Serialize)]
     enum Communication {
-        EMail { address: String },
-        Phone { number: String },
+        EMail { personid: String, address: String },
+        Phone { personid: String, number: String },
     }
 
     #[test]
     fn row_serializer() {
         let p = Person {
+            personid: "#1".into(),
             name: "Peter Jaeckel".into(),
             gender: Gender::Male,
             age: 53,
+            identification: BTreeMap::from([("A".to_string(), "B".to_string())]),
             communications: vec![
                 Communication::EMail {
+                    personid: String::new(),
                     address: "a@bc.de".into(),
                 },
                 Communication::Phone {
+                    personid: String::new(),
                     number: "1234".into(),
                 },
             ],
@@ -1685,25 +1203,53 @@ mod testing {
 
     #[derive(Serialize)]
     struct Order {
+        number: String,
         sold_to: Person,
     }
 
     #[test]
     fn order_serializer() {
+        assert!(TRACING.clone());
         let o = Order {
+            number: "#100".to_string(),
             sold_to: Person {
+                personid: "#2".to_string(),
                 name: "Lizzy".to_string(),
                 gender: Gender::Female,
                 age: 21,
+                identification: BTreeMap::from([("X".to_string(), "Y".to_string())]),
                 communications: vec![Communication::EMail {
+                    personid: String::new(),
                     address: "ab@c.de".into(),
                 }],
             },
         };
-        let model = DataModel::new("order");
+        let mut model = DataModel::new("order");
+        let rule = CopyRule::new(vec![]);
+
+        let mut meta = Meta::new();
+
+        let rel = meta.define_relation(One, "Order", "sold_to", "Person");
+        meta.map_field(rel.as_str(), "sold_to_id", "personid");
+
+        let rel = meta.define_relation(Many, "Person", "communications", "EMail");
+        meta.map_field(rel.as_str(), "personid", "personid");
+
+        model.set_meta(meta);
 
         let rs = crate::dbx::ser::serialize_row(Rc::new(model), o);
-        assert_eq!(3, rs.len());
-        let r = &rs[0];
+        assert_eq!(4, rs.len());
+        for r in rs.iter() {
+            match r.table() {
+                "Order" => {
+                    info!("result row: {}", r);
+                    assert!(r.get("sold_to_id") == Some(&SqlValue::from("#2")));
+                }
+                "Person" => info!("result row: {}", r),
+                "Communication.EMail" => info!("result row: {}", r),
+                "map" => info!("result row: {}", r),
+                _ => panic!("unknown row type {}", r.table()),
+            }
+        }
     }
 }
