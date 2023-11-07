@@ -1,5 +1,6 @@
 use super::{DBRow, SqlValue};
 use crate::data::model::DataModel;
+use crate::dbx::DBTable;
 use element::SerElement;
 use err::Error;
 use serde::ser::{Impossible, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant};
@@ -24,7 +25,8 @@ where
 mod element {
     use std::fmt::Display;
 
-    use tracing::info;
+    use rusqlite::types::Value;
+    use tracing::{info, trace};
 
     use crate::{
         data::model::meta::{
@@ -51,45 +53,59 @@ mod element {
                 (SerElement::Empty, Some(_)) => todo!(),
                 (SerElement::Value(_), None) => todo!(),
                 (SerElement::Value(_), Some(_)) => todo!(),
-                (SerElement::Sequence(_), None) => todo!(),
-                (SerElement::Sequence(s), Some(context)) => {
+                (SerElement::Sequence(s), context) => {
                     for x in s {
-                        let mut ss = x.as_rows(Some(context), meta);
+                        let mut ss = x.as_rows(context, meta);
                         result.append(&mut ss);
                     }
                 }
                 (SerElement::Row(n, r), None) => {
-                    info!("as rows Row {}", n);
+                    trace!("as rows Row {}", n);
                     let mut rr = DBRow::new(n.as_str());
                     for (k, v) in r {
                         match meta.get_relation(n.as_str(), k.as_str()) {
-                            Some(r) => match r.kind {
-                                One => {
-                                    handle_one_relation(v, &mut rr, k, n, meta, &mut result);
-                                    let sub_row = &result[0];
-                                    for (f_fld, t_fld) in r.fields.iter() {
-                                        info!("field map {} <- {}", f_fld, t_fld);
-                                        rr.insert(
-                                            f_fld.clone(),
-                                            sub_row.get(t_fld).unwrap().clone(),
-                                        );
-                                    }
-                                }
-                                Many => {
-                                    handle_many_relation(v, &mut rr, k, n, meta, &mut result);
-                                    for sub_row in result.iter_mut() {
+                            Some(r) => {
+                                info!("found relation {} {}", n, k);
+                                match &r.kind {
+                                    One => {
+                                        handle_one_relation(v, &mut rr, k, n, meta, &mut result);
+                                        let sub_row = &result[0];
                                         for (f_fld, t_fld) in r.fields.iter() {
-                                            info!("field map {} <- {}", t_fld, f_fld);
-                                            sub_row.insert(
-                                                t_fld.clone(),
-                                                rr.get(f_fld).unwrap().clone(),
+                                            info!("field map {} <- {}", f_fld, t_fld);
+                                            rr.insert(
+                                                f_fld.clone(),
+                                                sub_row.get(t_fld).unwrap().clone(),
                                             );
                                         }
                                     }
+                                    Many => {
+                                        handle_many_relation(v, &mut rr, k, n, meta, &mut result);
+                                        for sub_row in result.iter_mut() {
+                                            for (f_fld, t_fld) in r.fields.iter() {
+                                                info!("field map {} <- {}", t_fld, f_fld);
+                                                sub_row.insert(
+                                                    t_fld.clone(),
+                                                    rr.get(f_fld).unwrap().clone(),
+                                                );
+                                            }
+                                        }
+                                    }
+                                    ManyMany(rel_table) => {
+                                        info!("many to many relation {}", rel_table);
+                                        handle_many_many_relation(
+                                            v,
+                                            &mut rr,
+                                            k,
+                                            n,
+                                            rel_table,
+                                            meta,
+                                            &mut result,
+                                        );
+                                    }
                                 }
-                                ManyMany(_) => todo!(),
-                            },
+                            }
                             None => {
+                                // info!("no relation {} {}", n, k);
                                 handle_field(v, &mut rr, k, n, meta, &mut result);
                             }
                         };
@@ -129,6 +145,12 @@ mod element {
         }
     }
 
+    /// v - input value to be processed
+    /// rr - the direct result row. This will be enhanced by the new value
+    /// k - name of the field
+    /// n - name of the table this row belongs to
+    /// meta - information about relations and their fields
+    /// result - is the list of rows that are returned on the side while processing the value.
     fn handle_field(
         v: &SerElement,
         rr: &mut DBRow,
@@ -143,18 +165,24 @@ mod element {
             SerElement::Sequence(v) => {
                 info!("sub row sequence {}.{}", n, k);
                 for x in v {
-                    let mut rr = x.as_rows(None, meta);
-                    result.append(&mut rr);
+                    let mut sub_rows = x.as_rows(None, meta);
+                    result.append(&mut sub_rows);
                 }
             }
             SerElement::Row(n, _) => {
                 info!("sub row {}.{}", n, k);
-                let mut rr = v.as_rows(None, meta);
-                result.append(&mut rr);
+                let mut sub_rows = v.as_rows(None, meta);
+                result.append(&mut sub_rows);
             }
         }
     }
 
+    /// v - input value to be processed
+    /// rr - the direct result row. This will be enhanced by the new value
+    /// k - name of the field
+    /// n - name of the table this row belongs to
+    /// meta - information about relations and their fields
+    /// result - is the list of rows that are returned on the side while processing the value.
     fn handle_one_relation(
         v: &SerElement,
         rr: &mut DBRow,
@@ -174,6 +202,12 @@ mod element {
         }
     }
 
+    /// v - input value to be processed
+    /// rr - the direct result row. This will be enhanced by the new value
+    /// k - name of the field
+    /// n - name of the table this row belongs to
+    /// meta - information about relations and their fields
+    /// result - is the list of rows that are returned on the side while processing the value.
     fn handle_many_relation(
         v: &SerElement,
         rr: &mut DBRow,
@@ -197,6 +231,51 @@ mod element {
                 let mut rr = v.as_rows(None, meta);
                 result.append(&mut rr);
             }
+        }
+    }
+    /// v - input value to be processed
+    /// rr - the direct result row. This will be enhanced by the new value
+    /// k - name of the field
+    /// n - name of the table this row belongs to
+    /// meta - information about relations and their fields
+    /// result - is the list of rows that are returned on the side while processing the value.
+    fn handle_many_many_relation(
+        v: &SerElement,
+        rr: &mut DBRow,
+        k: &String,
+        n: &String,
+        rel_table: &String,
+        meta: &Meta,
+        result: &mut Vec<DBRow>,
+    ) {
+        info!("handle many many relation {} {} {}", k, n, rel_table);
+        match v {
+            SerElement::Empty => todo!("implement empty relationship"),
+            SerElement::Value(v) => panic!("relation cannot use atomic values"),
+            SerElement::Sequence(v) => {
+                for x in v {
+                    let mut sub_rows = x.as_rows(None, meta);
+                    let mut rel_row = DBRow::new(&rel_table);
+                    let rel = meta.get_relation(n, k).unwrap();
+                    let row1 = &sub_rows[0];
+                    for (fld, target) in rel.fields.iter() {
+                        let vtarget;
+                        if let Some(v0) = rr.get(fld.as_str()) {
+                            vtarget = v0.clone();
+                        } else {
+                            if let Some(v0) = row1.get(fld.as_str()) {
+                                vtarget = v0.clone();
+                            } else {
+                                panic!("field {} could not be mapped.", fld);
+                            }
+                        }
+                        rel_row.insert(target.clone(), vtarget);
+                    }
+                    result.append(&mut sub_rows);
+                    result.push(rel_row);
+                }
+            }
+            SerElement::Row(n, _) => todo!(),
         }
     }
 
@@ -554,7 +633,7 @@ impl SerializeStruct for DBRowSerializer {
     where
         T: Serialize,
     {
-        info!("serialize {}", key);
+        // info!("serialize {}", key);
         let s = SQLValueSerializer {
             model: self.model.clone(),
             name: Some(key.into()),
@@ -648,23 +727,23 @@ impl ser::Serializer for SQLValueSerializer {
     type SerializeStructVariant = StructSerializer;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
@@ -672,27 +751,27 @@ impl ser::Serializer for SQLValueSerializer {
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v as u16)))
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
@@ -700,7 +779,7 @@ impl ser::Serializer for SQLValueSerializer {
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        Ok(SerElement::Value(SqlValue::new(v)))
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
@@ -821,7 +900,7 @@ impl ser::Serializer for SQLValueSerializer {
 impl<'de> ser::Serializer for &RowSerializer {
     type Ok = SerElement;
     type Error = Error;
-    type SerializeSeq = Impossible<Self::Ok, Self::Error>;
+    type SerializeSeq = TableSerializer;
     type SerializeTuple = Impossible<Self::Ok, Self::Error>;
     type SerializeTupleStruct = Impossible<Self::Ok, Self::Error>;
     type SerializeTupleVariant = Impossible<Self::Ok, Self::Error>;
@@ -937,8 +1016,14 @@ impl<'de> ser::Serializer for &RowSerializer {
         todo!()
     }
 
-    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        todo!()
+    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+        info!("serialize sequence");
+        let s = TableSerializer {
+            rows: vec![],
+            model: self.model.clone(),
+            name: None,
+        };
+        Ok(s)
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {

@@ -6,8 +6,9 @@ use rusqlite::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fmt::{Display, Write},
+    ops::Index,
     rc::Rc,
-    sync::{Arc, Mutex, MutexGuard}, ops::Index,
+    sync::{Arc, Mutex, MutexGuard},
 };
 use tracing::*;
 pub mod de;
@@ -43,9 +44,9 @@ impl Display for SqlValue {
         match &self.0 {
             Value::Null => write!(f, "Null"),
             Value::Integer(v) => write!(f, "{}", v),
-            Value::Real(v) => write!(f, "{}",v),
-            Value::Text(v) => write!(f, "{}",v),
-            Value::Blob(v) => write!(f, "U8[{}]",v.len()),
+            Value::Real(v) => write!(f, "{}", v),
+            Value::Text(v) => write!(f, "{}", v),
+            Value::Blob(v) => write!(f, "U8[{}]", v.len()),
         }
     }
 }
@@ -98,10 +99,25 @@ pub struct DBRow {
 
 impl DBRow {
     fn get(&self, k: &str) -> Option<&SqlValue> {
-        if let Some((_, val)) = self.values.iter().find(|(key, _)| key == k) {
-            Some(val)
+        if let (Some(tabname), Some(idx)) = (&self.table, k.find(".")) {
+            let fld = &k[idx + 1..];
+            let tab = &k[..idx];
+            info!("find field {} {}", tab, fld);
+            if tab == tabname {
+                if let Some((_, val)) = self.values.iter().find(|(key, _)| key == fld) {
+                    Some(val)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
         } else {
-            None
+            if let Some((_, val)) = self.values.iter().find(|(key, _)| key == k) {
+                Some(val)
+            } else {
+                None
+            }
         }
     }
 
@@ -175,7 +191,7 @@ impl Display for DBRow {
             Some(tab_name) => write!(f, "{}(", tab_name),
             None => write!(f, "("),
         }?;
-        
+
         let mut sep = "";
         for (name, SqlValue(v)) in self.values.iter() {
             write!(f, "{}{}=", sep, name)?;
@@ -246,20 +262,20 @@ impl DBTable {
     }
 
     pub fn load_table_meta(&mut self, con: &Connection) {
-        info!("table: {}", self.name);
+        trace!("load table_info for {}", self.name);
         let mut s = con
             .prepare(format!("pragma table_info({:})", self.name).as_str())
             .unwrap();
         let mut q = s.query(()).expect("ok");
+        self.fields = vec![];
         while let Ok(Some(r)) = q.next() {
             let db_field = DBField {
                 name: r.get(1).unwrap(),
                 datatype: r.get(2).unwrap(),
                 default: r.get(4).unwrap(),
-                key: 1 == r.get(5).unwrap(),
+                key: 0 < r.get(5).unwrap(),
                 has_null: 0 == r.get(3).unwrap(),
             };
-            trace!("{:?}", db_field);
             self.fields.push(db_field);
         }
     }
@@ -270,6 +286,10 @@ impl DBTable {
             .filter(|x| x.key)
             .map(|x| x.name.as_str())
             .collect()
+    }
+
+    fn field(&self, field_name: &str) -> Option<&DBField> {
+        self.fields.iter().find(|x| x.name == field_name)
     }
 }
 
@@ -335,6 +355,7 @@ impl Database {
         } {
             let x = ser::serialize_row(model, value);
             for r in x {
+                info!("write row: {}", r);
                 self.modify_from(r.table(), &r);
             }
         }
@@ -355,12 +376,16 @@ impl Database {
 fn build_alter_table(t: &DBTable, t0: &Table) -> Result<Vec<String>, std::fmt::Error> {
     let mut result = vec![];
     // write!(&mut sql, "ALTER TABLE {} ", t.name)?;
-    for x in t.fields.iter() {
-        info!("field {} needs to be created.", x.name);
-        let mut sql = String::new();
-        write!(&mut sql, "ALTER TABLE {} ", t.name)?;
-        write!(&mut sql, "ADD COLUMN {}", x.name)?;
-        result.push(sql);
+    for x in t0.fields() {
+        if let Some(_db_field) = t.field(x.name.as_str()) {
+            trace!("field {} unchanged", x.name);
+        } else {
+            info!("field {} needs to be created.", x.name);
+            let mut sql = String::new();
+            write!(&mut sql, "ALTER TABLE {} ", t.name)?;
+            write!(&mut sql, "ADD COLUMN {}", x.name)?;
+            result.push(sql);
+        }
     }
     // info!("sql: {}", sql);
     Ok(result)
@@ -461,17 +486,17 @@ impl DatabaseImpl {
     }
 
     fn modify_from_upd_first(&self, table_name: &str, row: &DBRow) {
-        if let Some(con) = &self.con {
-            let tab = self.table(table_name);
+        if let (Some(con), Some(tab)) = (&self.con, self.table(table_name)) {
             let key = tab.key();
+            trace!("key: {:?} {:?}", key, tab);
             assert!(key.len() > 0, "no keys found in {:?}", tab);
             let (sql_upd, params) = create_update_statement_from(table_name, &key, &row);
-            info!("sql upd: {}", sql_upd);
+            trace!("sql upd: {}", sql_upd);
             let mut stmt = con.prepare(sql_upd.as_str()).unwrap();
             match stmt.execute(rusqlite::params_from_iter(params)) {
                 Ok(1) => {}
                 Ok(x) => {
-                    info!("update {} rows.", x);
+                    trace!("update {} rows.", x);
                     let (sql_ins, params) = create_insert_statement_from(&table_name, &row);
 
                     let mut stmt = con.prepare(sql_ins.as_str()).unwrap();
@@ -554,6 +579,7 @@ impl DatabaseImpl {
     }
 
     pub fn load_meta(&mut self) {
+        info!("loading metadata");
         self.collect_tables();
         if let Some(con) = &self.con {
             for t in self.tables.iter_mut() {
@@ -563,22 +589,35 @@ impl DatabaseImpl {
     }
 
     pub fn activate_structure(&mut self, model: DataModel) {
+        info!("activate structure");
         self.model = Some(Rc::new(model));
         if let Some(con) = &self.con {
             if let Some(m) = &self.model {
                 for t in m.tables() {
                     info!("activate table {}", t.name());
-                    let src = build_create_table(t).unwrap();
-                    info!("{}", src);
-                    con.execute(src.as_str(), []).unwrap();
+                    let dbtab = self.table(t.name());
+                    match dbtab {
+                        Some(dbtable) => {
+                            let srcs = build_alter_table(dbtable, t).unwrap();
+                            for src in srcs {
+                                con.execute(src.as_str(), []).unwrap();
+                            }
+                        }
+                        None => {
+                            let src = build_create_table(t).unwrap();
+                            info!("{}", src);
+                            con.execute(src.as_str(), []).unwrap();
+                        }
+                    }
                 }
             }
         }
         self.load_meta();
+        info!("activation finished");
     }
 
-    fn table(&self, table_name: &str) -> &DBTable {
-        let r = self.tables.iter().find(|x| x.name == table_name).unwrap();
+    fn table(&self, table_name: &str) -> Option<&DBTable> {
+        let r = self.tables.iter().find(|x| x.name == table_name);
         r
     }
 }

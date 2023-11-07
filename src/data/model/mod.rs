@@ -3,7 +3,7 @@ use crate::dbx::ser::{CopyRuleLib, FieldCopyRule};
 use self::meta::Meta;
 
 pub mod meta {
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct Relation {
         pub id: String,
         pub from: String,
@@ -13,12 +13,13 @@ pub mod meta {
         pub fields: Vec<(String, String)>,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub enum RelationKind {
         One,
         Many,
         ManyMany(String),
     }
+    #[derive(Debug,Clone)]
     pub struct Meta {
         relations: Vec<Relation>,
     }
@@ -58,7 +59,7 @@ pub mod meta {
             result
         }
 
-        pub(crate) fn map_field(&mut self, id: &str, from_field: &str, to_field: &str) {
+        pub fn map_field(&mut self, id: &str, from_field: &str, to_field: &str) {
             for x in self.relations.iter_mut() {
                 if x.id == id {
                     x.fields.push((from_field.into(), to_field.into()));
@@ -69,6 +70,7 @@ pub mod meta {
     }
 }
 
+#[derive(Debug,Clone)]
 pub struct DataModel {
     name: String,
     tables: Vec<Table>,
@@ -106,6 +108,7 @@ impl DataModel {
     }
 }
 
+#[derive(Debug,Clone)]
 pub struct Table {
     name: String,
     fields: Vec<Field>,
@@ -144,6 +147,7 @@ impl Table {
     }
 }
 
+#[derive(Debug,Clone)]
 pub struct Field {
     pub name: String,
     pub key: bool,

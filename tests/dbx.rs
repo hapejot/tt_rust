@@ -4,7 +4,10 @@ use serde_derive::Serialize;
 use tracing::*;
 use tt_rust::{
     data::{
-        model::{DataModel, Table},
+        model::{
+            meta::{Meta, RelationKind::One},
+            DataModel, Table,
+        },
         Query, WhereCondition, WhereExpr,
     },
     dbx::{
@@ -60,20 +63,17 @@ fn select() {
 pub enum Communication {
     #[serde(rename = "phone")]
     Phone {
-        id: String,
-        personid: Option<String>,
+        id: Option<String>,
         number: String,
         role: String,
     },
     #[serde(rename = "email")]
     EMail {
-        id: String,
-        personid: Option<String>,
+        id: Option<String>,
         address: String,
         role: String,
     },
 }
-
 
 pub fn new_guid() -> String {
     uuid::Uuid::new_v4().to_string()
@@ -103,14 +103,12 @@ fn serialize() {
             Communication::Phone {
                 number: "+4912345".to_string(),
                 role: "fake".to_string(),
-                id: new_guid(),
-                personid: None,
+                id: Some(new_guid()),
             },
             Communication::EMail {
                 address: "a@bc.de".to_string(),
                 role: "dummy".to_string(),
-                id: new_guid(),
-                personid: None,
+                id: Some(new_guid()),
             },
         ],
         id: new_guid(),
@@ -137,7 +135,6 @@ fn serialize() {
     for x in res {
         info!("phone: {}", x);
     }
-
 }
 
 fn prepare_person_db() -> tt_rust::dbx::Database {
@@ -178,16 +175,23 @@ fn make_person_model() -> DataModel {
                 .field("role", false, "string")
                 .field("number", false, "string"),
         );
+    let mut meta = Meta::new();
+    meta.define_relation(One, "person", "communication.email", "email");
+    meta.define_relation(One, "person", "communication.phone", "phone");
+    model.set_meta(meta);
     model
 }
 
 #[test]
 fn test_new_model() {
+    assert!(TRACING.clone());
     let model = make_person_model();
     let db = Database::new();
     db.connect(None);
-    db.activate_structure(model);
+    db.activate_structure(model.clone());
     for t in db.tables() {
         info!("table: {}", t);
     }
+    // check if we can activate the same model again without errors
+    db.activate_structure(model);
 }
