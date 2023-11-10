@@ -11,7 +11,7 @@ pub enum Address {
 
 #[derive(Debug)]
 pub enum Literal{
-    String(&'static str),
+    String(String),
     Int64(i64),
     Int8(i8),
     U8(u8),
@@ -81,11 +81,11 @@ impl Object {
         }))
     }
 
-    pub fn new_string(_s: &'static str) -> ObjectPtr {
+    pub fn new_string(s: &str) -> ObjectPtr {
         Arc::new(Mutex::new(Object {
             handler: nil_handler,
             vars: [].into(),
-            literal: Some(Literal::String(_s))
+            literal: Some(Literal::String(s.into()))
         }))
     }
 
@@ -93,7 +93,7 @@ impl Object {
 
 impl ObjectInternals for Object {
     fn as_str(&self) -> Option<String> {
-        if let Some(Literal::String(s)) = self.literal {
+        if let Some(Literal::String(s)) = &self.literal {
             Some(s.into())
         }
         else {

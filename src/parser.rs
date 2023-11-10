@@ -45,14 +45,11 @@ pub enum AST {
     PatternPart(String, Option<Box<AST>>, Box<AST>),
     List(Box<AST>, Box<AST>),
     Table(Vec<Box<AST>>),
-    MethodInvokation {
-        target: Box<AST>,
-        messages: Box<AST>,
-    },
+    Statements(Vec<AST>),
+    Messages(Box<AST>, Vec<AST>),
     Message {
-        inner: Option<Box<AST>>,
         name: String,
-        args: Vec<Box<AST>>,
+        args: Vec<AST>,
     },
     Variable(String),
     Empty,
@@ -97,10 +94,10 @@ fn params_from(name: &AST) -> Vec<String> {
     }
 }
 
-fn args_from(name: &AST) -> Vec<Box<AST>> {
+fn args_from(name: &AST) -> Vec<AST> {
     match name {
         AST::PatternPart(_, Some(x), rest) => {
-            let mut start = vec![x.clone()];
+            let mut start: Vec<AST> = vec![*x.clone()];
             start.extend_from_slice(args_from(rest).as_slice());
             start
         }
@@ -144,12 +141,8 @@ fn table_from(n: &AST) -> AST {
 
 pub fn grammar() -> Grammar<AST> {
     santiago::grammar!(
-        "defs" => empty => |_| AST::Empty;
-        "defs" => rules "def"
-            => |r| table_from(&r[0].clone());
-        "defs" => rules "defs" "chunk sep" "def"
-            => |r| match r.as_slice() {     [a,_,b] => table_add(a,b),
-                                _ => unreachable!(),    };
+        "cmd" => rules "define_cmd" "def";
+        "cmd" => rules "eval_cmd" "statements" "dot" => |r:Vec<AST>| r[1].clone();
 
         "def" => rules "method definition";
         "def" => empty => |_| AST::Empty;
@@ -173,20 +166,21 @@ pub fn grammar() -> Grammar<AST> {
             => |r| AST::PatternPart((&r[0]).into(), Some(r[1].clone().into()), Box::new(AST::Empty));
         "keyword pattern" => rules "keyword"  "identifier" "keyword pattern"
             => |r| AST::PatternPart((&r[0]).into(), Some(r[1].clone().into()), Box::new(r[2].clone()));
-        "statements" => empty => |_| AST::Empty;
-        "statements" => rules "return statement" => |r| AST::Table(vec![Box::new(r[0].clone())]);
-        "statements" => rules "return statement" "dot" => |r| AST::Table(vec![Box::new(r[0].clone())]);
-        "statements" => rules "expression" "dot" "statements" 
+        "statements" => empty => |_| AST::Statements(vec![]);
+        "statements" => rules "return statement" => |r| AST::Statements(vec![r[0].clone()]);
+        "statements" => rules "return statement" "dot" => |r| AST::Statements(vec![r[0].clone()]);
+        "statements" => rules "expression" "dot" "statements"
             => |r| {
-            if let AST::Table(mut x) = r[2].clone(){
-                x.insert(0,Box::new(r[0].clone()));
-                AST::Table(x)
+            if let AST::Statements(x) = &r[2]{
+                let mut v = vec![r[0].clone()];
+                for e in x {v.push(e.clone());}
+                AST::Statements(v)
             }
             else {
-                r[0].clone()
+                AST::Statements(vec![r[0].clone()])
             }
         };
-        "statements" => rules "expression" => |r| AST::Table(vec![Box::new(r[0].clone())]);
+        "statements" => rules "expression" => |r| AST::Statements(vec![r[0].clone()]);
         "return statement" => rules "return op" "expression"
             => |r| AST::Return(Box::new(r[1].clone()));
         "expression" => rules "basic expression" => |r| r[0].clone();
@@ -194,15 +188,18 @@ pub fn grammar() -> Grammar<AST> {
         "assignment" => rules "identifier" "assignmentOperator" "expression" => |r| r[0].clone();
         "basic expression" => rules "primary" => |r| r[0].clone();
         "basic expression" => rules "primary" "messages"
-            => |r| AST::MethodInvokation{target:Box::new(r[0].clone()),
-                                         messages: Box::new(r[1].clone())} ;
+                => |r| if let AST::Messages(_, msgs) = &r[1] {
+                    AST::Messages(Box::new(r[0].clone()), msgs.clone())
+                }
+                else {
+                    panic!("sub tree is not a messages list.")
+                };
         "messages" => rules "keyword message or empty"
                     =>|r| r[0].clone();
         "unary messages or empty" => rules "unary messages" => |r| r[0].clone();
         "unary messages or empty" => empty => |_| AST::Empty;
         "unary messages" => rules "unary message" => |r| r[0].clone();
-        "unary message" => rules "unarySelector" => |r|     AST::Message { inner: None, 
-                                                                            name: selector_from(&r[0]), 
+        "unary message" => rules "unarySelector" => |r|     AST::Message {  name: selector_from(&r[0]),
                                                                             args: vec![] };
         "binary messages or empty" => rules "binary messages" => |r| r[0].clone();
         "binary messages or empty" => empty => |_| AST::Empty;
@@ -210,29 +207,26 @@ pub fn grammar() -> Grammar<AST> {
         "binary message" => rules "unary message"
             => |r| r[0].clone();
         "binary message" => rules "unary messages" "binarySelector" "expression"
-            => |r| AST::Message{inner: Some(Box::new(r[0].clone())),
-                                name: selector_from(&r[1]),
-                                args: vec![Box::new(r[2].clone())]};
+            => |r| AST::Message{name: selector_from(&r[1]),
+                                args: vec![r[2].clone()]};
         "binary message" => rules "binarySelector" "expression"
-            => |r| AST::Message{inner: None,
+            => |r| AST::Messages(Box::new(AST::Empty), vec![AST::Message{
                                 name: selector_from(&r[0]),
-                                args: vec![Box::new(r[1].clone())]};
-        // "keyword message or empty" => rules "binary messages"  
+                                args: vec![r[1].clone()]}]);
+        // "keyword message or empty" => rules "binary messages"
         //     => |r| r[0].clone();
         "keyword message or empty" => rules "binary message"
             => |r| r[0].clone();
-        "keyword message or empty" => rules "keyword message"  
+        "keyword message or empty" => rules "keyword message"
             => |r| r[0].clone();
         "keyword message or empty" => rules "binary message" "keyword message parts"
-            => |r|   AST::Message { inner: Some(Box::new(r[0].clone())), 
-                name: selector_from(&r[1]), 
+            => |r|   AST::Message { name: selector_from(&r[1]),
                 args: args_from(&r[1]) };
         "keyword message" => rules "keyword message parts"
-            => |r|   AST::Message { inner: None, 
-                                    name: selector_from(&r[0]), 
+            => |r|   AST::Message { name: selector_from(&r[0]),
                                     args: args_from(&r[0]) };
 
-        "keyword message parts" => rules "keyword" "keyword argument" "keyword message parts" 
+        "keyword message parts" => rules "keyword" "keyword argument" "keyword message parts"
             => |r| AST::PatternPart(String::from(&r[0]),
                                     Some(r[1].clone().into()),
                                     Box::new(r[2].clone()));
@@ -264,6 +258,8 @@ pub fn grammar() -> Grammar<AST> {
         "bar" => lexemes "|" => |_| AST::Empty;
         "openParen" => lexemes "(" => |_| AST::Empty;
         "closeParen" => lexemes ")" => |_| AST::Empty;
+        "define_cmd" => lexemes "DEFINE" => |_| AST::Empty;
+        "eval_cmd" => lexemes "EVALUATE" => |_| AST::Empty;
     )
 }
 
