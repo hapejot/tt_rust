@@ -30,7 +30,7 @@ pub fn lexer_rules() -> LexerRules {
 // use santiago::grammar::Associativity;
 use santiago::grammar::Grammar;
 
-use crate::runtime::get_selector;
+use crate::runtime::sel::SelectorSet;
 
 #[derive(Debug, Clone)]
 pub enum AST {
@@ -116,10 +116,10 @@ fn selector_from(name: &AST) -> &'static str {
     match name {
         AST::PatternPart(x, _, rest) => {
             let r = selector_from(rest);
-            get_selector(format!("{}{}", x, &r).as_str())
+            SelectorSet::get(format!("{}{}", x, &r).as_str())
         }
         AST::Empty => "",
-        AST::Name(s) => get_selector(s.as_str()),
+        AST::Name(s) => SelectorSet::get(s.as_str()),
         _ => {
             println!("selector_from {:?}", name);
             unreachable!()

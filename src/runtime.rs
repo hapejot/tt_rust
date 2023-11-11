@@ -1,3 +1,5 @@
+pub mod sel;
+
 use std::{
     collections::BTreeMap,
     fmt::Display,
@@ -32,16 +34,6 @@ pub enum Instruction {
 
 pub type ObjectVec<'a> = &'a [ObjectPtr];
 pub type Instructions = Vec<Instruction>;
-
-static selectors: Mutex<Vec<&'static String>> = Mutex::new(vec![]);
-
-pub fn get_selector(name: &str) -> &'static str {
-    let mut lck = selectors.lock().unwrap();
-    let s0 = Box::new(name.to_string());
-    let s1: &'static String = Box::leak(s0);
-    lck.push(s1);
-    s1
-}
 
 #[derive(Clone)]
 pub struct ObjectPtr {

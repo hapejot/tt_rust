@@ -179,7 +179,15 @@ impl DBRow {
 
     fn table(&self) -> &str {
         match &self.table {
-            Some(t) => t.as_str(),
+            Some(t) => {
+                if let Some(idx) = t.find(".") {
+                    let tab = &t[idx + 1..];
+                    // let tab = &t[..idx];
+                    tab
+                } else {
+                    t.as_str()
+                }
+            }
             None => todo!(),
         }
     }
@@ -506,6 +514,13 @@ impl DatabaseImpl {
                     }
                 }
                 Err(_) => todo!(),
+            }
+        } else {
+            if let None = &self.con {
+                panic!("connection not usable");
+            }
+            if let None = &self.table(table_name) {
+                panic!("table not available: {}", table_name);
             }
         }
     }

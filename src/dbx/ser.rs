@@ -1278,7 +1278,7 @@ mod testing {
         let model = DataModel::new("person");
 
         let rs = crate::dbx::ser::serialize_row(Rc::new(model), p);
-        assert_eq!(3, rs.len());
+        assert_eq!(4, rs.len());
         let r = &rs[0];
         assert!(String::from(r.get("name").unwrap().clone()) == String::from("Peter Jaeckel"));
         assert!(String::from(r.get("gender").unwrap().clone()) == String::from("m"));
@@ -1331,7 +1331,7 @@ mod testing {
                     assert!(r.get("sold_to_id") == Some(&SqlValue::from("#2")));
                 }
                 "Person" => info!("result row: {}", r),
-                "Communication.EMail" => info!("result row: {}", r),
+                "EMail" => info!("result row: {}", r),
                 "map" => info!("result row: {}", r),
                 _ => panic!("unknown row type {}", r.table()),
             }

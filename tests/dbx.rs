@@ -125,10 +125,10 @@ fn serialize() {
     }
 
     let res = db.execute_query("select * from email");
-    assert_eq!(1, res.len());
-    for x in res {
+    for x in res.iter() {
         info!("email: {}", x);
     }
+    assert_eq!(1, res.len());
 
     let res = db.execute_query("select * from phone");
     assert_eq!(1, res.len());

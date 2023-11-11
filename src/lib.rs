@@ -16,8 +16,8 @@ pub static TRACING: Lazy<bool> = Lazy::new(init_tracing);
 
 pub fn init_tracing() -> bool {
     use tracing_subscriber::filter::LevelFilter;
-    let n = format!("test-{}.log", chrono::Utc::now());
-    let path = Path::new(&n);
+    // let n = format!("test-{}.log", chrono::Utc::now());
+    let path = Path::new("tracing.log");
     let log_file = std::fs::File::create(path).unwrap();
     let subscriber = tracing_subscriber::fmt()
         .with_writer(Mutex::new(log_file))
