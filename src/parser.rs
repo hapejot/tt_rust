@@ -30,13 +30,15 @@ pub fn lexer_rules() -> LexerRules {
 // use santiago::grammar::Associativity;
 use santiago::grammar::Grammar;
 
+use crate::runtime::get_selector;
+
 #[derive(Debug, Clone)]
 pub enum AST {
     Int(isize),
     String(String),
     Name(String),
     Method {
-        name: String,
+        name: &'static str,
         params: Vec<String>,
         temps: Vec<String>,
         body: Box<AST>,
@@ -48,7 +50,7 @@ pub enum AST {
     Statements(Vec<AST>),
     Messages(Box<AST>, Vec<AST>),
     Message {
-        name: String,
+        name: &'static str,
         args: Vec<AST>,
     },
     Variable(String),
@@ -110,14 +112,14 @@ fn args_from(name: &AST) -> Vec<AST> {
     }
 }
 
-fn selector_from(name: &AST) -> String {
+fn selector_from(name: &AST) -> &'static str {
     match name {
         AST::PatternPart(x, _, rest) => {
             let r = selector_from(rest);
-            x.clone() + &r
+            get_selector(format!("{}{}", x, &r).as_str())
         }
-        AST::Empty => String::new(),
-        AST::Name(s) => s.clone(),
+        AST::Empty => "",
+        AST::Name(s) => get_selector(s.as_str()),
         _ => {
             println!("selector_from {:?}", name);
             unreachable!()

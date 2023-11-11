@@ -10,7 +10,7 @@ use santiago::{
     lexer::{lex, Lexeme, LexerError, Position},
     parser::{parse, ParseError, Tree},
 };
-use tt_rust::{parser::{grammar, lexer_rules, AST}, runtime::Object};
+use tt_rust::{parser::{grammar, lexer_rules, AST}, runtime::{Object, ObjectPtr}};
 
 struct AppError {
     msg: Box<dyn std::fmt::Display>,
@@ -92,9 +92,9 @@ impl Context {
         Self {}
     }
 
-    fn eval(&mut self, t: &AST) -> Object {
+    fn eval(&mut self, t: &AST) -> ObjectPtr {
         match t {
-            AST::Int(n) => Object::new(n.to_string()),
+            AST::Int(n) => Object::new_string(n.to_string().as_str()),
             AST::String(_) => todo!(),
             AST::Name(_) => todo!(),
             AST::Method {
@@ -113,7 +113,7 @@ impl Context {
             AST::Variable(_) => todo!(),
             AST::Empty => todo!(),
             AST::Statements(s) => {
-                let mut r = Object::new("<none>".into());
+                let mut r = Object::new_string("<none>".into());
                 for x in s {
                     r = self.eval(x);
                 }
@@ -121,7 +121,7 @@ impl Context {
             }
             AST::Messages(target, msgs) => {
                 let target_obj = self.eval(target);
-                let mut r = Object::new("<nomsg>".into());
+                let mut r = Object::new_string("<nomsg>".into());
                 for m in msgs {
                     if let AST::Message { name, args } = m {
                         let mut oargs = vec![];
