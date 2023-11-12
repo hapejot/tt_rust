@@ -1,6 +1,7 @@
 use std::{collections::HashSet, sync::Mutex};
 
 use once_cell::sync::Lazy;
+use tracing::info;
 
 pub struct SelectorSet {
     cache: Mutex<HashSet<&'static str>>,
@@ -17,6 +18,12 @@ impl SelectorSet {
                 lck.insert(s1);
                 s1
             }
+        }
+    }
+
+    pub fn stats() {
+        for x in SELECTOR_SET.cache.lock().unwrap().iter() {
+            info!("selector {}", x);
         }
     }
 }

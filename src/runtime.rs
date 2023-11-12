@@ -1,4 +1,8 @@
+pub mod fmt;
+pub mod int;
+pub mod nil;
 pub mod sel;
+pub mod str;
 
 use std::{
     fmt::Display,
@@ -38,11 +42,11 @@ pub struct ObjectPtr {
     ptr: Arc<Object>,
 }
 impl ObjectPtr {
-    pub fn send(&self, name: &'static str, as_slice: &[ObjectPtr]) -> ObjectPtr {
+    pub fn send(&self, selector: &'static str, args: &[ObjectPtr]) -> ObjectPtr {
         let o = self.ptr.data.lock().unwrap();
 
         let handler = o.handler;
-        handler(name, self.clone(), as_slice)
+        handler(selector, self.clone(), args)
     }
 }
 
@@ -59,9 +63,64 @@ impl std::fmt::Debug for ObjectPtr {
     }
 }
 
-impl Display for ObjectPtr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Object[]")
+// impl Display for Re {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         match self.as_receiver() {
+//             Ok(d) => {
+//                 let h = d.handler;
+
+//                 let fmt_obj = Formatter(f);
+//                 let fmt_ptr = fmt_obj.to_object_ptr();
+//                 h(
+//                     SelectorSet::get("native_display_on:"),
+//                     self.clone(),
+//                     &[fmt_ptr],
+//                 );
+//             }
+//             Err(_) => todo!(),
+//         }
+//         Ok(())
+//     }
+// }
+
+pub trait Receiver {
+    fn receive_message(&self, selector: &'static str, args: &[&dyn Receiver]) -> Box<dyn Receiver>;
+
+    fn as_int(&self) -> Option<isize>;
+    fn as_str(&self) -> Option<&'static str>;
+}
+
+impl Display for dyn Receiver {
+    fn fmt<'b>(&self, f: &mut std::fmt::Formatter<'b>) -> std::fmt::Result {
+        let fmt: &dyn Receiver = &fmt::Formatter::new(f);
+        self.receive_message("basic_write_to", &[fmt]);
+        Ok(())
+    }
+}
+
+pub trait AsObject {
+    fn as_object(self) -> Object;
+}
+
+impl AsObject for &mut std::fmt::Formatter<'_> {
+    fn as_object(self) -> Object {
+        todo!()
+    }
+}
+
+impl ToObjectPtr for fmt::Formatter<'_, '_> {
+    fn to_object_ptr(self) -> ObjectPtr {
+        todo!()
+    }
+}
+
+trait ToObjectPtr {
+    fn to_object_ptr(self) -> ObjectPtr;
+}
+
+impl ToObjectPtr for Object {
+    fn to_object_ptr(self) -> ObjectPtr {
+        todo!()
     }
 }
 
@@ -218,8 +277,6 @@ fn jump_to_end(_frame: &mut Frame) {
 
 #[cfg(test)]
 mod test {
-
-    
 
     use crate::runtime::*;
 

@@ -1,6 +1,11 @@
-use tt_rust::evaluate_script;
+use tt_rust::{evaluate_script, runtime::sel::SelectorSet, TRACING};
 
 #[test]
 fn eval() {
-    evaluate_script(String::from("1+2.")).unwrap();
+    assert!(TRACING.clone());
+    let o = evaluate_script(String::from("1 + 2 * 3.")).unwrap();
+
+    SelectorSet::stats();
+
+    assert_eq!(o.as_int(), Some(9));
 }
