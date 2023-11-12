@@ -21,9 +21,9 @@ where
 mod testing {
     use serde_derive::Deserialize;
 
-    use rusqlite::{params, Connection, Result};
+    use rusqlite::{Connection, Result};
 
-    use crate::dbx::de::{from_row};
+    use crate::dbx::de::from_row;
 
     // use super::StatementStream;
 
@@ -63,7 +63,7 @@ mod testing {
     fn main() -> Result<()> {
         let conn = setup_data();
 
-        let mut stmt = conn.prepare("SELECT id, name, data FROM person")?;
+        let _stmt = conn.prepare("SELECT id, name, data FROM person")?;
         // let x: Person = from_statement(stmt).unwrap();
         // let person_iter = stmt.query_map([], |row| {
         //     Ok(Person {

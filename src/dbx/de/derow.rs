@@ -24,7 +24,7 @@ impl<'row, 'stmt, 'cols> Deserializer<'row, 'stmt, 'cols> {
         if let Some(idx) = self.idx {
             self.row
                 .get(idx)
-                .map_err(|err| Error::Message("sqlite get index".to_string()))
+                .map_err(|_err| Error::Message("sqlite get index".to_string()))
         } else {
             panic!("not in field state.");
         }
@@ -63,8 +63,8 @@ impl<'de> serde::Deserializer<'de> for Deserializer<'de, '_, '_> {
 
     fn deserialize_struct<V>(
         self,
-        name: &'static str,
-        fields: &'static [&'static str],
+        _name: &'static str,
+        _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -122,6 +122,7 @@ impl<'de> MapAccess<'de> for RowMapAccess<'de, '_, '_> {
     }
 }
 
+#[allow(unused_mut)]
 fn add_field_to_error(mut error: Error, _error_column: &str) -> Error {
     error
 }

@@ -3,7 +3,7 @@ use tt_rust::data::{
     Query, WhereCondition, WhereExpr,
 };
 
-use std::slice::Iter;
+
 
 #[test]
 fn query() {
@@ -12,14 +12,14 @@ fn query() {
     let q = Query::new("object", vec!["id", "type"], w);
     let sql = q.get_sql();
     assert_eq!(sql, "SELECT id,type FROM object WHERE type = ?");
-    let p = q.get_params();
+    let _p = q.get_params();
     // assert_eq!(p, vec!["Null"]);
 }
 
 #[test]
 fn data_model() {
     let mut model = DataModel::new("Person");
-    let mut tab = Table::new("person")
+    let tab = Table::new("person")
         .field("id", true, "string")
         .field("name1", false, "string")
         .field("name2", false, "string")

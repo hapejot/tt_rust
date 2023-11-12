@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+use std::fmt::Write;
 use rusqlite::{
     ffi::Error,
     types::{ToSqlOutput, Value},
@@ -5,8 +7,7 @@ use rusqlite::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    fmt::{Display, Write},
-    ops::Index,
+    fmt::Display,
     rc::Rc,
     sync::{Arc, Mutex, MutexGuard},
 };
@@ -16,7 +17,7 @@ pub mod ser;
 
 use crate::data::model::{DataModel, Table};
 
-use self::ser::{CopyRule, CopyRuleLib};
+
 use std::clone::Clone;
 #[derive(Debug, Clone)]
 pub struct DatabaseBuilder {}
@@ -97,6 +98,7 @@ pub struct DBRow {
     values: Vec<(String, SqlValue)>,
 }
 
+#[allow(dead_code)]
 impl DBRow {
     fn get(&self, k: &str) -> Option<&SqlValue> {
         if let (Some(tabname), Some(idx)) = (&self.table, k.find(".")) {
@@ -216,6 +218,7 @@ impl Display for DBRow {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct Database {
     arc: Arc<DatabaseGuarded>,
@@ -226,6 +229,7 @@ pub struct DatabaseGuarded {
     mutex: Mutex<DatabaseImpl>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Field {
     name: String,
@@ -237,6 +241,7 @@ pub struct Field {
     default: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct DBField {
     name: String,
@@ -441,7 +446,7 @@ impl DataDictionary {
             .unwrap();
         let mut q = s.query(()).unwrap();
         while let Ok(Some(r)) = q.next() {
-            let table_name: String = r.get(0).unwrap();
+            let _table_name: String = r.get(0).unwrap();
         }
 
         //         let t = if let Some(t) = self.lookup_table(table_name.as_str()) {
@@ -456,6 +461,8 @@ impl DataDictionary {
         //     }
     }
 }
+
+#[allow(dead_code)]
 
 impl DatabaseImpl {
     /// if the primary key is satisfied first try to insert
@@ -675,7 +682,7 @@ fn create_insert_statement_from<'a>(arg: &str, s: &'a DBRow) -> (String, Vec<ToS
     write!(&mut sql, ") VALUES (").unwrap();
     sep = "";
     let mut params = vec![];
-    for (k, v) in s.values.iter() {
+    for (_k, v) in s.values.iter() {
         write!(&mut sql, "{}?", sep).unwrap();
         sep = ",";
         params.push(v.to_sql());

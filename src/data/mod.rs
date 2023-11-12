@@ -2,10 +2,8 @@ pub mod model;
 
 
 use std::clone::Clone;
-use std::collections::BTreeMap;
 use std::fmt::Write;
-use std::ops::Index;
-use tracing::{error,warn,info, debug,trace};
+use tracing::trace;
 
 use crate::dbx::SqlValue;
 
@@ -163,10 +161,9 @@ impl WhereCondition {
             write!(&mut sql, " WHERE ").unwrap();
             for x in self.all.iter() {
                 match x {
-                    WhereExpr::Equals(fld, v) => {
+                    WhereExpr::Equals(fld, _v) => {
                         write!(&mut sql, "{}{} = ?", sep, fld).unwrap();
                     }
-                    _ => todo!(),
                 }
                 sep = " AND ";
             }
@@ -181,7 +178,6 @@ impl WhereCondition {
                 WhereExpr::Equals(_, v) => {
                     p.push(v.clone());
                 }
-                _ => todo!(),
             }
         }
         p
@@ -195,6 +191,7 @@ pub struct Query {
     condition: WhereCondition,
 }
 
+#[allow(dead_code)]
 impl Query {
     pub fn new(table: &str, fields: Vec<&str>, condition: WhereCondition) -> Self {
         Self {
@@ -255,7 +252,6 @@ impl From<WhereCondition> for String {
                     WhereExpr::Equals(fld, val) => {
                         write!(&mut sql, "{}{} = '{}'", sep, fld, String::from(val)).unwrap();
                     }
-                    _ => todo!(),
                 }
                 sep = " AND ";
             }

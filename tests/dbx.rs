@@ -11,7 +11,7 @@ use tt_rust::{
         Query, WhereCondition, WhereExpr,
     },
     dbx::{
-        ser::{CopyRule, CopyRuleLib, FieldCopyRule},
+        ser::{CopyRule, FieldCopyRule},
         DBRow, Database, DatabaseBuilder,
     },
     TRACING,
@@ -138,8 +138,8 @@ fn serialize() {
 }
 
 fn prepare_person_db() -> tt_rust::dbx::Database {
-    let mut builder = DatabaseBuilder::new();
-    let copy_rule_1 = CopyRule::new(vec![FieldCopyRule {
+    let builder = DatabaseBuilder::new();
+    let _copy_rule_1 = CopyRule::new(vec![FieldCopyRule {
         source: "id".to_string(),
         target: "personid".to_string(),
     }]);
@@ -153,7 +153,7 @@ fn prepare_person_db() -> tt_rust::dbx::Database {
 
 fn make_person_model() -> DataModel {
     let mut model = DataModel::new("Person");
-    let mut tab = Table::new("person")
+    let tab = Table::new("person")
         .field("id", true, "string")
         .field("name1", false, "string")
         .field("name2", false, "string")

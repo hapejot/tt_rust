@@ -28,6 +28,7 @@ impl Panel {
     pub fn add(&mut self, g: Box<dyn Glyph>) {
         self.elements.push(g);
     }
+    #[allow(dead_code)]
     fn write_width_markers(&self, w: &mut dyn Write) {
         for i in 1..=self.area.w {
             let label: Vec<char> = format!("{i:03}").chars().collect();

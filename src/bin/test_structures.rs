@@ -1,8 +1,4 @@
-use std::{
-    sync::{Arc, Mutex},
-};
-
-
+use std::sync::{Arc, Mutex};
 
 trait W {
     fn draw(&self);
@@ -19,6 +15,7 @@ impl W for L {
     }
 }
 
+#[allow(dead_code)]
 impl L {
     pub fn new<T: Into<String>>(s: T) -> L {
         L {
@@ -54,7 +51,7 @@ impl TextContent {
             s: Arc::new(Mutex::new("".into())),
         }
     }
-    pub fn new<T:Into<String>>(s:T) -> TextContent {
+    pub fn new<T: Into<String>>(s: T) -> TextContent {
         TextContent {
             s: Arc::new(Mutex::new(s.into())),
         }

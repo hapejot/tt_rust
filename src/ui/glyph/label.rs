@@ -70,7 +70,7 @@ impl Glyph for Label {
         }
     }
 
-    fn hit(&mut self, x: u16, y: u16) -> super::AppResponse {
+    fn hit(&mut self, _x: u16, _y: u16) -> super::AppResponse {
         Err(NotRelevant)
     }
 

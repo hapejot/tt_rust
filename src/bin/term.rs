@@ -223,7 +223,7 @@ async fn event_loop(w: &mut Box<dyn Write>, _d: AppData) -> AppData {
 }
 
 #[allow(dead_code)]
-async fn event_loop2(w: &mut Box<dyn Write>, _d: &AppData) {
+async fn event_loop2(_w: &mut Box<dyn Write>, _d: &AppData) {
     // let key_c = Event::Key(KeyCode::Char('c').into());
     // let mut reader = EventStream::new();
     // let _ = w.queue(Clear(ClearType::All)).expect("clear").flush();
@@ -338,20 +338,21 @@ async fn main() -> Result<()> {
     disable_raw_mode()
 }
 
-// #[tokio::test]
-async fn ui1() {
-    use bytes::BufMut;
-    use std::io::Write;
 
-    let p = Box::new(Panel::new());
-    let f = &Frame::new(p);
-    // let mut o = vec![].writer();
-    // f.write_to(&mut o);
-    // let xo = o.into_inner();
-    // assert_eq!(*xo, b"(Panel)(Frame)"[..]);
-    let mut o = stdout();
-    enable_raw_mode().unwrap();
-    o.queue(Clear(ClearType::All)).unwrap();
-    f.write_to(&mut o);
-    disable_raw_mode().unwrap();
-}
+// #[tokio::test]
+// async fn ui1() {
+//     use bytes::BufMut;
+//     use std::io::Write;
+
+//     let p = Box::new(Panel::new());
+//     let f = &Frame::new(p);
+//     // let mut o = vec![].writer();
+//     // f.write_to(&mut o);
+//     // let xo = o.into_inner();
+//     // assert_eq!(*xo, b"(Panel)(Frame)"[..]);
+//     let mut o = stdout();
+//     enable_raw_mode().unwrap();
+//     o.queue(Clear(ClearType::All)).unwrap();
+//     f.write_to(&mut o);
+//     disable_raw_mode().unwrap();
+// }

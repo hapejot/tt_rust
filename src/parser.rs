@@ -127,6 +127,7 @@ fn selector_from(name: &AST) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn table_add(a: &AST, b: &AST) -> AST {
     if let AST::Table(t) = a {
         let mut t_new = t.clone();
@@ -137,6 +138,7 @@ fn table_add(a: &AST, b: &AST) -> AST {
     }
 }
 
+#[allow(dead_code)]
 fn table_from(n: &AST) -> AST {
     AST::Table(vec![Box::new(n.clone())])
 }

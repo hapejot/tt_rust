@@ -4,24 +4,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crossterm::{
-    cursor::{MoveTo},
-    event::{Event}, queue,
-};
-
-
+use crossterm::{cursor::MoveTo, event::Event, queue};
 
 pub enum Value {
-    Literal(&'static str)
+    Literal(&'static str),
 }
 
-
+#[allow(dead_code)]
 impl Value {
-    fn new_literal(x: &'static str) -> Value{
+    fn new_literal(x: &'static str) -> Value {
         Value::Literal(x)
     }
 }
-
 
 #[derive(Clone)]
 pub struct TextContent {

@@ -1,9 +1,7 @@
 pub mod sel;
 
 use std::{
-    collections::BTreeMap,
     fmt::Display,
-    pin::Pin,
     sync::{Arc, Mutex},
 };
 
@@ -103,6 +101,7 @@ pub struct Object {
     data: Mutex<ObjectData>,
 }
 
+#[allow(dead_code)]
 struct ObjectData {
     handler: Handler,
     vars: Vec<ObjectPtr>,
@@ -183,6 +182,7 @@ fn nil_handler(_sel: &str, _s: ObjectPtr, _args: &[ObjectPtr]) -> ObjectPtr {
     _s
 }
 
+#[allow(dead_code)]
 fn str_handler(_sel: &str, _s: ObjectPtr, _args: ObjectVec) -> ObjectPtr {
     _s
 }
@@ -219,7 +219,7 @@ fn jump_to_end(_frame: &mut Frame) {
 #[cfg(test)]
 mod test {
 
-    use std::ptr;
+    
 
     use crate::runtime::*;
 
