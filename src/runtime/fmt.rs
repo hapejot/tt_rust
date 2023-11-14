@@ -1,6 +1,6 @@
 use super::Receiver;
 use crate::runtime::nil::NilReciever;
-use std::sync::Mutex;
+use std::{rc::Rc, sync::Mutex};
 
 pub struct Formatter<'a, 'b> {
     f: Mutex<&'a mut std::fmt::Formatter<'b>>,
@@ -13,11 +13,7 @@ impl<'a, 'b> Formatter<'a, 'b> {
 }
 
 impl Receiver for Formatter<'_, '_> {
-    fn receive_message(
-        &self,
-        selector: &'static str,
-        _args: &[&dyn Receiver],
-    ) -> Box<dyn Receiver> {
+    fn receive_message(&self, selector: &'static str, _args: &[Rc<dyn Receiver>]) -> Rc<dyn Receiver> {
         match selector {
             "write" => {
                 let mut f = self.f.lock().unwrap();

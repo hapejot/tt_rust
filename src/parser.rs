@@ -1,11 +1,13 @@
 use santiago::lexer::LexerRules;
+use tracing::error;
 
 pub fn lexer_rules() -> LexerRules {
     santiago::lexer_rules!(
         "DEFAULT" | "INT" = pattern r"[0-9]+";
         "DEFAULT" | "IDENTIFIER" = pattern r"[a-zA-Z_][a-zA-Z_0-9]*";
         "DEFAULT" | "KEYWORD" = pattern r"[a-zA-Z_][a-zA-Z_0-9]*:";
-        // "DEFAULT" | "LOCAL" = pattern r":[a-zA-Z_][a-zA-Z_0-9]*";
+        "DEFAULT" | "STRING" = pattern r"'[^']*'";
+         // "DEFAULT" | "LOCAL" = pattern r":[a-zA-Z_][a-zA-Z_0-9]*";
         "DEFAULT" | "COMMENT" = pattern "\"[^\"]*\"" => |l| l.skip();
         "DEFAULT" | ":" = string ":";
         // "DEFAULT" | "BINARY" = string "+";
@@ -21,7 +23,8 @@ pub fn lexer_rules() -> LexerRules {
         "DEFAULT" | ")" = string ")";
         "DEFAULT" | "|" = string "|";
         "DEFAULT" | "ASSIGN" = string ":=";
-        "DEFAULT" | "BINARY" = pattern r"[=+\-*/]+";
+        "DEFAULT" | "ASSIGN" = string "<-";
+        "DEFAULT" | "BINARY" = pattern r"[=+\-*/@]+";
         "DEFAULT" | "CHAR" = pattern r"\$.";
         "DEFAULT" | "WS" = pattern r"\s" => |lexer| lexer.skip();
     )
@@ -35,12 +38,17 @@ use crate::runtime::sel::SelectorSet;
 #[derive(Debug, Clone)]
 pub enum AST {
     Int(isize),
-    String(String),
-    Name(String),
+    String(&'static str),
+    Name(&'static str),
     Method {
         name: &'static str,
-        params: Vec<String>,
-        temps: Vec<String>,
+        params: Vec<&'static str>,
+        temps: Vec<&'static str>,
+        body: Box<AST>,
+    },
+    Block {
+        params: Vec<&'static str>,
+        temps: Vec<&'static str>,
         body: Box<AST>,
     },
     Return(Box<AST>),
@@ -48,12 +56,15 @@ pub enum AST {
     List(Box<AST>, Box<AST>),
     Table(Vec<Box<AST>>),
     Statements(Vec<AST>),
-    Messages(Box<AST>, Vec<AST>),
+    InvokeSequence(Box<AST>, Vec<AST>),
+    InvokeCascade(Box<AST>, Vec<AST>),
     Message {
         name: &'static str,
         args: Vec<AST>,
     },
-    Variable(String),
+    Variable(&'static str),
+    Assign(Box<AST>, Box<AST>),
+    Dummy(String),
     Empty,
 }
 
@@ -62,7 +73,7 @@ impl From<&AST> for String {
         println!("AST to String: {:?}", s);
         match s {
             AST::Empty => String::from("<empty>"),
-            AST::Name(x) => x.clone(),
+            AST::Name(x) => (*x).into(),
             _ => format!("{:?}", s),
         }
     }
@@ -77,11 +88,27 @@ fn gen_method(name: &AST, _temps: &AST, body: &AST) -> AST {
     }
 }
 
-fn params_from(name: &AST) -> Vec<String> {
+fn names_from(t: &AST) -> Vec<&'static str> {
+    match t {
+        AST::Table(tab) => {
+            let mut r = vec![];
+            for x in tab {
+                match **x {
+                    AST::Name(n) => r.push(n),
+                    _ => panic!("unexpected"),
+                }
+            }
+            r
+        }
+        _ => panic!("not expected"),
+    }
+}
+
+fn params_from(name: &AST) -> Vec<&'static str> {
     match name {
         AST::PatternPart(_, Some(x0), rest) => match *x0.clone() {
             AST::Name(x) => {
-                let mut start = vec![x.clone()];
+                let mut start = vec![x];
                 start.extend_from_slice(params_from(rest).as_slice());
                 start
             }
@@ -119,7 +146,7 @@ fn selector_from(name: &AST) -> &'static str {
             SelectorSet::get(format!("{}{}", x, &r).as_str())
         }
         AST::Empty => "",
-        AST::Name(s) => SelectorSet::get(s.as_str()),
+        AST::Name(s) => SelectorSet::get(*s),
         _ => {
             println!("selector_from {:?}", name);
             unreachable!()
@@ -145,173 +172,186 @@ fn table_from(n: &AST) -> AST {
 
 pub fn grammar() -> Grammar<AST> {
     santiago::grammar!(
-            "cmd" => rules "define_cmd" "def";
-            "cmd" => rules "eval_cmd" "statements" "dot" => |r:Vec<AST>| r[1].clone();
+        "cmd" => rules "define_cmd" "def";
+        "cmd" => rules "method_cmd" "method definition" => |r:Vec<AST>| r[1].clone();
+        "cmd" => rules "eval_cmd" "statements" "dot" => |r:Vec<AST>| r[1].clone();
 
-            "def" => rules "method definition";
-            "def" => empty => |_| AST::Empty;
+        "def" => rules "method definition";
+        "def" => empty => |_| AST::Empty;
 
-            "method definition" => rules "message pattern" "temporaries" "statements"
-                => |r| gen_method(&r[0], &r[1], &r[2]);
+        "method definition" => rules "message pattern" "temporaries" "statements"
+            => |r| gen_method(&r[0], &r[1], &r[2]);
 
-            "chunk sep" => lexemes "END_OF_CHUNK" => |_| AST::Empty;
-            "temporaries" => empty  => |_| AST::Empty;
-            "temporaries" => rules "bar" "identifiers" "bar" => |r| r[1].clone();
-            "identifiers" => rules "identifier" => |r| r[0].clone();
-            "identifiers" => rules "identifiers" "identifier" => |r| r[0].clone();
-            "message pattern" => rules "unary pattern" => |r| r[0].clone();
-            "message pattern" => rules "binary pattern" => |r| r[0].clone();
-            "message pattern" => rules "keyword pattern" => |r| r[0].clone();
-            "unary pattern" => rules "unarySelector"
-                => |r| AST::PatternPart((&r[0]).into(), None, Box::new(AST::Empty));
-            "binary pattern" => rules "binarySelector" "identifier"
-                => |r| AST::PatternPart((&r[0]).into(), Some(r[1].clone().into()), Box::new(AST::Empty));
-            "keyword pattern" => rules "keyword"  "identifier"
-                => |r| AST::PatternPart((&r[0]).into(), Some(r[1].clone().into()), Box::new(AST::Empty));
-            "keyword pattern" => rules "keyword"  "identifier" "keyword pattern"
-                => |r| AST::PatternPart((&r[0]).into(), Some(r[1].clone().into()), Box::new(r[2].clone()));
-            "statements" => empty => |_| AST::Statements(vec![]);
-            "statements" => rules "return statement" => |r| AST::Statements(vec![r[0].clone()]);
-            "statements" => rules "return statement" "dot" => |r| AST::Statements(vec![r[0].clone()]);
-            "statements" => rules "expression" "dot" "statements"
-                => |r| {
-                if let AST::Statements(x) = &r[2]{
-                    let mut v = vec![r[0].clone()];
-                    for e in x {v.push(e.clone());}
-                    AST::Statements(v)
+        "chunk sep" => lexemes "END_OF_CHUNK" => |_| AST::Dummy(String::from("chunk separator"));
+        "temporaries" => empty  => |_| AST::Dummy(String::from("temporaries"));
+        "temporaries" => rules "bar" "identifiers" "bar" => |r| r[1].clone();
+        "identifiers" => rules "identifier" => |r| r[0].clone();
+        "identifiers" => rules "identifiers" "identifier" => |r| r[0].clone();
+        "message pattern" => rules "unary pattern" => |r| r[0].clone();
+        "message pattern" => rules "binary pattern" => |r| r[0].clone();
+        "message pattern" => rules "keyword pattern" => |r| r[0].clone();
+        "unary pattern" => rules "unarySelector"
+            => |r| AST::PatternPart((&r[0]).into(), None, Box::new(AST::Empty));
+        "binary pattern" => rules "binarySelector" "identifier"
+            => |r| AST::PatternPart((&r[0]).into(), Some(r[1].clone().into()), Box::new(AST::Empty));
+        "keyword pattern" => rules "keyword"  "identifier"
+            => |r| AST::PatternPart((&r[0]).into(), Some(r[1].clone().into()), Box::new(AST::Empty));
+        "keyword pattern" => rules "keyword"  "identifier" "keyword pattern"
+            => |r| AST::PatternPart((&r[0]).into(), Some(r[1].clone().into()), Box::new(r[2].clone()));
+        "statements" => empty => |_| AST::Statements(vec![]);
+        "statements" => rules "return statement" => |r| AST::Statements(vec![r[0].clone()]);
+        "statements" => rules "return statement" "dot" => |r| AST::Statements(vec![r[0].clone()]);
+        "statements" => rules "expression" "dot" "statements"
+            => |r| {
+            if let AST::Statements(x) = &r[2]{
+                let mut v = vec![r[0].clone()];
+                for e in x {v.push(e.clone());}
+                AST::Statements(v)
+            }
+            else {
+                AST::Statements(vec![r[0].clone()])
+            }
+        };
+        "statements" => rules "expression" => |r| AST::Statements(vec![r[0].clone()]);
+        "return statement" => rules "return op" "expression"
+            => |r| AST::Return(Box::new(r[1].clone()));
+        "expression" => rules "basic expression" => |r| r[0].clone();
+        "expression" => rules "assignment" => |r| r[0].clone();
+        "assignment" => rules "identifier" "assignmentOperator" "expression"
+            => |r| AST::Assign(Box::new(r[0].clone()), Box::new(r[2].clone()));
+        "basic expression" => rules "primary" => |r| r[0].clone();
+        "basic expression" => rules "primary" "messages"
+                => |r| if let AST::InvokeSequence(_, msgs) = &r[1] {
+                    AST::InvokeSequence(Box::new(r[0].clone()), msgs.clone())
                 }
                 else {
-                    AST::Statements(vec![r[0].clone()])
+                    error!("sub tree is not a messages list. {:#?}", r);
+                    r[0].clone()
+                };
+        "messages" => empty => |_| AST::Empty;
+        "messages" => rules "message"
+            =>|r| match r[0] {
+                AST::Message{..} => AST::InvokeSequence(Box::new(AST::Dummy(String::from("empty target"))), vec![r[0].clone()]),
+                _ => todo!("{:?}", r[0]),
+            };
+        "messages" => rules "binary messages or empty"
+            =>|r| r[0].clone();
+        "unary messages or empty" => rules "unary messages" => |r| r[0].clone();
+        "unary messages or empty" => empty => |_| AST::Empty;
+        "unary messages" => rules "unary message" => |r| r[0].clone();
+        "unary message" => rules "unarySelector" => |r|     AST::Message {  name: selector_from(&r[0]),
+                                                                            args: vec![] };
+        "unary expression" => rules "primary";
+        "unary expression" => rules "primary" "unary messages"
+            => |r| match &r[1] {
+                        AST::Message { .. } => AST::InvokeSequence(Box::new(r[0].clone()), vec![r[1].clone()]),
+                        AST::InvokeSequence(_,_) => r[1].clone(),
+                        _ => todo!(),
+        };
+        "binary messages or empty" => rules "binary messages" => |r| r[0].clone();
+        "binary messages or empty" => empty => |_| AST::Empty;
+        "binary messages" => rules "binary message"
+            => |r| AST::InvokeSequence(Box::new(AST::Dummy(String::from("empty bin target"))), vec![r[0].clone()]);
+        "binary messages" => rules "binary messages" "binary message"
+            => |r| {
+            if let AST::InvokeSequence(target, msgs) = &r[0] {
+                let mut ms = msgs.clone();
+                ms.push(r[1].clone());
+                AST::InvokeSequence(target.clone(), ms)
+            }
+            else {
+                AST::Dummy(String::from("no invoke seq"))
+            }
+        };
+        "binary message" => rules "unary message"
+            => |r| r[0].clone();
+        "binary message" => rules "unary messages" "binarySelector" "unary expression" // "expression" is not working, since it would generate an implict right associated tree, which is wrong for Smalltalk
+            => |r| AST::Message{name: selector_from(&r[1]),
+                                args: vec![r[2].clone()]};
+        "binary message" => rules "binarySelector" "unary expression"
+            => |r| AST::Message{name: selector_from(&r[0]),
+                                args: vec![r[1].clone()]};
+        "binary expression" => rules "unary expression";
+        "binary expression" => rules "binary expression" "binarySelector" "unary expression"
+                => |r| match (&r[0], &r[1]) {
+                        (AST::InvokeSequence(receiver, msgs), AST::Name(name)) => {
+                            let mut ms = msgs.clone();
+                            ms.push(AST::Message { name, args: vec![r[2].clone()] });
+                            AST::InvokeSequence(receiver.clone(), ms )},
+                        (receiver, AST::Name(name)) => {
+                                let ms = vec![AST::Message { name, args: vec![r[2].clone()] }];
+                                AST::InvokeSequence(Box::new(receiver.clone()), ms )},
+                            _ => todo!("{:?}", &r),
+                };
+
+        // "message" => rules "binary messages"
+        //     => |r| r[0].clone();
+        "message" => rules "binary message"
+            => |r| r[0].clone();
+        "message" => rules "keyword message"
+            => |r| r[0].clone();
+        "message" => rules "binary message" "keyword message parts"
+            => |r|   AST::Message { name: selector_from(&r[1]),
+                args: args_from(&r[1]) };
+        "keyword message" => rules "keyword message parts"
+            => |r|   AST::Message { name: selector_from(&r[0]),
+                                    args: args_from(&r[0]) };
+
+        "keyword message parts" => rules "keyword" "keyword argument" "keyword message parts"
+            => |r| AST::PatternPart(String::from(&r[0]),
+                                    Some(r[1].clone().into()),
+                                    Box::new(r[2].clone()));
+        "keyword message parts" => rules "keyword" "keyword argument"
+            => |r| AST::PatternPart(String::from(&r[0]),
+                                    Some(r[1].clone().into()),
+                                    Box::new(AST::Empty));
+        "keyword argument" => rules "binary expression"
+            => |r| r[0].clone();
+        "primary" => lexemes "STRING" => |l| AST::String(SelectorSet::get(&l[0].raw));
+        "primary" => lexemes "IDENTIFIER" => |l| AST::Variable(SelectorSet::get(&l[0].raw));
+        "primary" => lexemes "CHAR" => |l| AST::String(SelectorSet::get(&l[0].raw));
+        "primary" => lexemes "INT" => |l| AST::Int(l[0].raw.to_string().parse::<isize>().unwrap());
+        "primary" => rules "block constructor" => |r| r[0].clone();
+        "primary" => rules "openParen" "expression" "closeParen" => |r| r[1].clone();
+        "block constructor" => rules "blockStart" "block args" "temporaries" "block body" "blockEnd"
+            => |r| AST::Block{
+                            params: names_from(&r[1]),
+                            temps: vec![],
+                            body: Box::new(r[3].clone()) };
+        "block args" => rules "block arguments" "bar"
+            => |r| r[0].clone();
+        "block args" => empty
+            => |_| AST::Table(vec![]);
+        "block arguments" => empty => |_| AST::Table(vec![]);
+        "block arguments" => rules "block arguments" "colon" "identifier"
+            => |r| {
+                if let AST::Table(mut lst) = r[0].clone()
+                {
+                    lst.push(Box::new(r[2].clone()));
+                    AST::Table(lst)
+                }
+                else {
+                    panic!("no table")
                 }
             };
-            "statements" => rules "expression" => |r| AST::Statements(vec![r[0].clone()]);
-            "return statement" => rules "return op" "expression"
-                => |r| AST::Return(Box::new(r[1].clone()));
-            "expression" => rules "basic expression" => |r| r[0].clone();
-            "expression" => rules "assignment" => |r| r[0].clone();
-            "assignment" => rules "identifier" "assignmentOperator" "expression" => |r| r[0].clone();
-            "basic expression" => rules "primary" => |r| r[0].clone();
-            "basic expression" => rules "primary" "messages"
-                    => |r| if let AST::Messages(_, msgs) = &r[1] {
-                        AST::Messages(Box::new(r[0].clone()), msgs.clone())
-                    }
-                    else {
-                        panic!("sub tree is not a messages list.")
-                    };
-            "messages" => rules "keyword message or empty"
-                =>|r| r[0].clone();
-            "messages" => rules "binary messages or empty"
-                =>|r| r[0].clone();
-            "messages" => rules "unary messages or empty"
-                =>|r| r[0].clone();
-            "unary messages or empty" => rules "unary messages" => |r| r[0].clone();
-            "unary messages or empty" => empty => |_| AST::Empty;
-            "unary messages" => rules "unary message" => |r| r[0].clone();
-            "unary message" => rules "unarySelector" => |r|     AST::Message {  name: selector_from(&r[0]),
-                                                                                args: vec![] };
-            "unary expression" => rules "primary" "unary messages or empty"
-                => |r| match &r[1] {
-                            AST::Int(_) => todo!(),
-                            AST::String(_) => todo!(),
-                            AST::Name(_) => todo!(),
-                            AST::Method { .. } => todo!(),
-                            AST::Return(_) => todo!(),
-                            AST::PatternPart(_, _, _) => todo!(),
-                            AST::List(_, _) => todo!(),
-                            AST::Table(_) => todo!(),
-                            AST::Statements(_) => todo!(),
-                            AST::Messages(..) => todo!(),
-                            AST::Message { .. } => AST::Messages(Box::new(r[0].clone()), vec![r[1].clone()]),
-                            AST::Variable(_) => todo!(),
-                            AST::Empty => r[0].clone(),
-    };
-            "binary messages or empty" => rules "binary messages" => |r| r[0].clone();
-            "binary messages or empty" => empty => |_| AST::Empty;
-            "binary messages" => rules "binary message"
-                => |r| AST::Messages(Box::new(AST::Empty), vec![r[0].clone()]);
-            "binary messages" => rules "binary messages" "binary message"
-                => |r| {
-                if let AST::Messages(target, msgs) = &r[0] {
-                    let mut ms = msgs.clone();
-                    ms.push(r[1].clone());
-                    AST::Messages(target.clone(), ms)
-                }
-                else {AST::Empty}  };
-
-            "binary message" => rules "unary message"
-                => |r| r[0].clone();
-            "binary message" => rules "unary messages" "binarySelector" "unary expression" // "expression" is not working, since it would generate an implict right associated tree, which is wrong for Smalltalk
-                => |r| AST::Message{name: selector_from(&r[1]),
-                                    args: vec![r[2].clone()]};
-            "binary message" => rules "binarySelector" "unary expression"
-                => |r| AST::Message{name: selector_from(&r[0]),
-                                    args: vec![r[1].clone()]};
-            "binary expression" => rules "unary expression";
-            "binary expression" => rules "unary expression" "binarySelector" "unary expression"
-                    => |r| match &r[0] {
-                            AST::Int(_) => todo!(),
-                            AST::String(_) => todo!(),
-                            AST::Name(_) => todo!(),
-                            AST::Method { .. } => todo!(),
-                            AST::Return(_) => todo!(),
-                            AST::PatternPart(_, _, _) => todo!(),
-                            AST::List(_, _) => todo!(),
-                            AST::Table(_) => todo!(),
-                            AST::Statements(_) => todo!(),
-                            AST::Messages(receiver, msgs) => AST::Messages(receiver.clone(), msgs.clone() ),
-                            AST::Message { .. } => todo!(),
-                            AST::Variable(_) => todo!(),
-                            AST::Empty => todo!(),
-                    };
-
-            // "keyword message or empty" => rules "binary messages"
-            //     => |r| r[0].clone();
-            "keyword message or empty" => rules "binary message"
-                => |r| r[0].clone();
-            "keyword message or empty" => rules "keyword message"
-                => |r| r[0].clone();
-            "keyword message or empty" => rules "binary message" "keyword message parts"
-                => |r|   AST::Message { name: selector_from(&r[1]),
-                    args: args_from(&r[1]) };
-            "keyword message" => rules "keyword message parts"
-                => |r|   AST::Message { name: selector_from(&r[0]),
-                                        args: args_from(&r[0]) };
-
-            "keyword message parts" => rules "keyword" "keyword argument" "keyword message parts"
-                => |r| AST::PatternPart(String::from(&r[0]),
-                                        Some(r[1].clone().into()),
-                                        Box::new(r[2].clone()));
-            "keyword message parts" => rules "keyword" "keyword argument"
-                => |r| AST::PatternPart(String::from(&r[0]),
-                Some(r[1].clone().into()),
-                Box::new(AST::Empty));
-            "keyword argument" => rules "primary" "unary messages or empty" "binary messages or empty"
-                => |r| r[0].clone();
-            "primary" => lexemes "IDENTIFIER" => |l| AST::Variable(String::from(&l[0].raw));
-            "primary" => lexemes "CHAR" => |l| AST::String(String::from(&l[0].raw));
-            "primary" => lexemes "INT" => |l| AST::Int(l[0].raw.to_string().parse::<isize>().unwrap());
-            "primary" => rules "block constructor" => |r| r[0].clone();
-            "primary" => rules "openParen" "expression" "closeParen" => |r| r[1].clone();
-            "block constructor" => rules "blockStart" "block arguments" "temporaries" "block body" "blockEnd" => |r| r[0].clone();
-            "block arguments" => rules "colon" "identifier" "bar" => |r| r[0].clone();
-            "block arguments" => empty => |_| AST::Empty;
-            "block body" => rules "statements" => |r| r[0].clone();
-            "dot" => lexemes "." => |_| AST::Empty;
-            "return op" => lexemes "^" => |_| AST::Empty;
-            "unarySelector" => lexemes "IDENTIFIER" => |l| AST::Name(String::from(&l[0].raw));
-            "identifier" => lexemes "IDENTIFIER" => |l| AST::Name(String::from(&l[0].raw));
-            "binarySelector" => lexemes "BINARY" => |l| AST::Name(String::from(&l[0].raw));
-            "assignmentOperator" => lexemes "ASSIGN" => |_| AST::Empty;
-            "keyword" => lexemes "KEYWORD" => |l| AST::Name(String::from(&l[0].raw));
-            "blockStart" => lexemes "[" => |_| AST::Empty;
-            "blockEnd" => lexemes "]" => |_| AST::Empty;
-            "colon" => lexemes ":" => |_| AST::Empty;
-            "bar" => lexemes "|" => |_| AST::Empty;
-            "openParen" => lexemes "(" => |_| AST::Empty;
-            "closeParen" => lexemes ")" => |_| AST::Empty;
-            "define_cmd" => lexemes "DEFINE" => |_| AST::Empty;
-            "eval_cmd" => lexemes "EVALUATE" => |_| AST::Empty;
-        )
+        "block body" => rules "statements" => |r| r[0].clone();
+        "dot" => lexemes "." => |_| AST::Empty;
+        "return op" => lexemes "^" => |_| AST::Empty;
+        "unarySelector" => lexemes "IDENTIFIER" => |l| AST::Name(SelectorSet::get(&l[0].raw));
+        "identifier" => lexemes "IDENTIFIER" => |l| AST::Name(SelectorSet::get(&l[0].raw));
+        "binarySelector" => lexemes "BINARY" => |l| AST::Name(SelectorSet::get(&l[0].raw));
+        "assignmentOperator" => lexemes "ASSIGN" => |_| AST::Empty;
+        "keyword" => lexemes "KEYWORD" => |l| AST::Name(SelectorSet::get(&l[0].raw));
+        "blockStart" => lexemes "[" => |_| AST::Empty;
+        "blockEnd" => lexemes "]" => |_| AST::Empty;
+        "colon" => lexemes ":" => |_| AST::Empty;
+        "bar" => lexemes "|" => |_| AST::Empty;
+        "openParen" => lexemes "(" => |_| AST::Empty;
+        "closeParen" => lexemes ")" => |_| AST::Empty;
+        "define_cmd" => lexemes "DEFINE" => |_| AST::Empty;
+        "eval_cmd" => lexemes "EVALUATE" => |_| AST::Empty;
+        "method_cmd" => lexemes "METHOD" => |_| AST::Empty;
+    )
 }
 
 pub fn eval(value: &AST) -> isize {

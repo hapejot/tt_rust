@@ -1,13 +1,18 @@
+pub mod blk;
 pub mod fmt;
 pub mod int;
 pub mod nil;
+pub mod pnt;
 pub mod sel;
 pub mod str;
 
 use std::{
     fmt::Display,
+    rc::Rc,
     sync::{Arc, Mutex},
 };
+
+use self::str::StringReceiver;
 
 #[derive(Debug)]
 pub enum Address {
@@ -84,7 +89,11 @@ impl std::fmt::Debug for ObjectPtr {
 // }
 
 pub trait Receiver {
-    fn receive_message(&self, selector: &'static str, args: &[&dyn Receiver]) -> Box<dyn Receiver>;
+    fn receive_message(
+        &self,
+        selector: &'static str,
+        args: &[Rc<dyn Receiver>],
+    ) -> Rc<dyn Receiver>;
 
     fn as_int(&self) -> Option<isize>;
     fn as_str(&self) -> Option<&'static str>;
@@ -92,8 +101,10 @@ pub trait Receiver {
 
 impl Display for dyn Receiver {
     fn fmt<'b>(&self, f: &mut std::fmt::Formatter<'b>) -> std::fmt::Result {
-        let fmt: &dyn Receiver = &fmt::Formatter::new(f);
-        self.receive_message("basic_write_to", &[fmt]);
+        // let fmt = Rc::new(fmt::Formatter::new(f));
+        let fmt = Rc::new(StringReceiver(String::new()));
+        self.receive_message("basic_write_to", &[fmt.clone()]);
+        write!(f, "{}", fmt.as_str().unwrap())?;
         Ok(())
     }
 }
