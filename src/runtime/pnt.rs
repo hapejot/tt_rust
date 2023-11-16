@@ -45,7 +45,7 @@ impl Receiver for PointReceiver {
                 Rc::new(PointReceiver::new(self.0 + x, self.1 + y))
             }
             "basic_write_to" => {
-                let a0 = StringReceiver(format!("{}@{}", self.0, self.1));
+                let a0 = StringReceiver::new(format!("{}@{}", self.0, self.1));
                 args[0].receive_message("write", &[Rc::new(a0)])
             }
             _ => todo!("{}", selector),

@@ -17,10 +17,11 @@ impl Receiver for IntReceiver {
         args: &[Rc<dyn Receiver>],
     ) -> Rc<dyn Receiver> {
         match selector {
+            "==" => Rc::new(IntReceiver::new(if self.0 == args[0].as_int().unwrap() {1} else {0} )),
             "+" => Rc::new(IntReceiver(self.0 + args[0].as_int().unwrap())),
             "*" => Rc::new(IntReceiver(self.0 * args[0].as_int().unwrap())),
             "basic_write_to" => {
-                let a0 = StringReceiver(format!("{}", self.0));
+                let a0 = StringReceiver::new(format!("{}", self.0));
                 args[0].receive_message("write", &[Rc::new(a0)])
             }
             "@" => Rc::new(PointReceiver::new(self.0, args[0].as_int().unwrap())),

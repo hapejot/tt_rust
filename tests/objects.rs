@@ -10,6 +10,28 @@ fn string_format() {
     assert_eq!(o.as_str(), Some("Five is 5."));
 }
 
+#[test]
+fn eval_bug_1(){
+    assert!(TRACING.clone());
+    let o = evaluate_script(String::from("
+        '' species new: 10 streamContents: [ :result | result nextPut: $X ].
+    ")).unwrap();
+    SelectorSet::stats();
+    assert_eq!(o.as_str(), Some("X"));
+}
+
+#[test]
+fn format() {
+    assert!(TRACING.clone());
+    let o = evaluate_script(String::from("
+        1234.
+    ")).unwrap();
+    SelectorSet::stats();
+    assert_eq!(o.as_int(), Some(1234));
+    assert_eq!(format!("{}", o), "1234");
+}
+
+
 
 #[test]
 fn block_1() {
@@ -58,15 +80,28 @@ fn eval_vars() {
 #[test]
 fn eval() {
     assert!(TRACING.clone());
-    let o = evaluate_script(String::from("1 + 2 * 3.")).unwrap();
+    let o = evaluate_script(String::from("
+        1 + 2 * 3.")).unwrap();
     SelectorSet::stats();
     assert_eq!(o.as_int(), Some(9));
 }
 
 #[test]
+fn eval_to_3() {
+    assert!(TRACING.clone());
+    let o = evaluate_script(String::from("
+        1 + 2.")).unwrap();
+    SelectorSet::stats();
+    assert_eq!(o.as_int(), Some(3));
+}
+
+#[test]
 fn eval_to_7() {
     assert!(TRACING.clone());
-    let o = evaluate_script(String::from("1 + (2 * 3).")).unwrap();
+    let o = evaluate_script(String::from("
+        1 + (2 * 3).")).unwrap();
     SelectorSet::stats();
     assert_eq!(o.as_int(), Some(7));
 }
+
+

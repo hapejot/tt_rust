@@ -5,6 +5,7 @@ pub mod nil;
 pub mod pnt;
 pub mod sel;
 pub mod str;
+pub mod stm;  // stream
 
 use std::{
     fmt::Display,
@@ -102,7 +103,7 @@ pub trait Receiver {
 impl Display for dyn Receiver {
     fn fmt<'b>(&self, f: &mut std::fmt::Formatter<'b>) -> std::fmt::Result {
         // let fmt = Rc::new(fmt::Formatter::new(f));
-        let fmt = Rc::new(StringReceiver(String::new()));
+        let fmt = Rc::new(StringReceiver::new(String::new()));
         self.receive_message("basic_write_to", &[fmt.clone()]);
         write!(f, "{}", fmt.as_str().unwrap())?;
         Ok(())

@@ -2,14 +2,15 @@ use std::{collections::BTreeMap, fmt::Display, rc::Rc};
 
 use parser::AST;
 use runtime::{
-    int::IntReceiver, nil::NilReciever, pnt::PointMetaReceiver, sel::SelectorSet,
-    str::StringReceiver, Object, ObjectPtr, Receiver, blk::BlockReceiver,
+    blk::BlockReceiver, int::IntReceiver, nil::NilReciever, pnt::PointMetaReceiver,
+    sel::SelectorSet, str::StringReceiver, Object, ObjectPtr, Receiver,
 };
 
 use santiago::{
     lexer::{lex, Lexeme, LexerError, Position},
     parser::{parse, ParseError, Tree},
 };
+use tracing::info;
 use std::{path::Path, sync::Mutex};
 
 use once_cell::sync::Lazy;
@@ -185,7 +186,7 @@ impl Context {
     fn eval_to_reciever(&mut self, t: &AST) -> Rc<dyn runtime::Receiver> {
         match t {
             AST::Int(n) => Rc::new(IntReceiver::new(*n)),
-            AST::String(s) => Rc::new(StringReceiver(String::from(*s))),
+            AST::String(s) => Rc::new(StringReceiver::new(String::from(*s))),
             AST::Name(_) => todo!(),
             AST::Method {
                 name: _,
@@ -247,9 +248,21 @@ impl Context {
                     panic!("unexpected {:?}", t)
                 }
             }
-            AST::Block { params, temps, body } => {
-                Rc::new(BlockReceiver::new(params, temps, body.clone()))
+            AST::Block {
+                params,
+                temps,
+                body,
+            } => {
+                info!("instantiate block");
+                let r = BlockReceiver::new(self.myself.clone(), params, temps, body.clone());
+                let map = self.receiver_names.lock().unwrap();
+                for (k,v) in map.iter() {
+                    info!("push {} to block context", *k);
+                    r.define(*k, v.clone());
+                }
+                Rc::new(r)
             }
+            AST::Char(c) => Rc::new(IntReceiver::new(*c as isize)),
             _ => todo!("{:?}", t),
         }
     }
