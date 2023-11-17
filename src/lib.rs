@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Display, rc::Rc};
+use std::{collections::BTreeMap, fmt::Display, rc::Rc, string};
 
 use parser::AST;
 use runtime::{
@@ -10,8 +10,8 @@ use santiago::{
     lexer::{lex, Lexeme, LexerError, Position},
     parser::{parse, ParseError, Tree},
 };
-use tracing::info;
 use std::{path::Path, sync::Mutex};
+use tracing::info;
 
 use once_cell::sync::Lazy;
 
@@ -71,6 +71,132 @@ pub fn evaluate_script(
         println!("-> {:#?}", &ast);
         o = ctx.eval_to_reciever(&ast);
         println!("eval -> {}", o);
+    }
+    Ok(o)
+}
+
+#[derive(Debug)]
+pub struct ByteCode {
+    code: Vec<String>,
+    stack: Vec<usize>,
+    names: Vec<(String, usize)>,
+}
+
+impl Display for ByteCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "ByteCode:")?;
+        for idx in 0..self.code.len() {
+            writeln!(f, "   r{} = {}", idx, self.code[idx])?
+        }
+        Ok(())
+    }
+}
+
+impl ByteCode {
+    fn new() -> Self {
+        Self {
+            code: vec![],
+            stack: vec![],
+            names: vec![],
+        }
+    }
+
+    fn define(&mut self, name: String, idx: usize) {
+        self.names.push((name, idx));
+    }
+
+    fn idx_for(&self, name: &str) -> Option<usize> {
+        let r = self.names.iter().find(|x| x.0 == name);
+        match r {
+            Some((_, v)) => Some(*v),
+            None => None,
+        }
+    }
+
+    fn compile(&mut self, ast: &AST) -> usize {
+        match ast {
+            AST::Int(v) => self.push(format!("int {}", v)),
+            AST::Char(v) => self.push(format!("chr {}", v)),
+            AST::String(v) => self.push(format!("str {}", v)),
+            AST::Name(_) => todo!(),
+            AST::Method {
+                name,
+                params,
+                temps,
+                body,
+            } => todo!(),
+            AST::Block {
+                params,
+                temps,
+                body,
+            } => {
+                self.compile(body)
+            },
+            AST::Return(_) => todo!(),
+            AST::PatternPart(_, _, _) => todo!(),
+            AST::List(_, _) => todo!(),
+            AST::Table(_) => todo!(),
+            AST::Statements(s) => {
+                let mut n = 0;
+                for stmt in s {
+                    n = self.compile(stmt);
+                }
+                n
+            }
+            AST::InvokeSequence(a, b) => {
+                let mut n = self.compile(a);
+                self.stack.push(n);
+                for x in b {
+                    n = self.compile(x);
+                    self.stack.push(n);
+                }
+                n
+            }
+            AST::InvokeCascade(_, _) => todo!(),
+            AST::Message { name, args } => {
+                let mut c = format!("{:?} invoke {}", self.stack.pop(), name);
+                for x in args {
+                    let n = self.compile(x);
+                    c.push_str(format!(" r{}", n).as_str());
+                }
+                self.push(c)
+            }
+            AST::Variable(name) => match self.idx_for(*name) {
+                Some(idx) => idx,
+                None => {
+                    let idx = self.push(format!("global {}", name));
+                    self.define(name.to_string(), idx);
+                    idx
+                }
+            },
+            AST::Assign(namet, v) => {
+                if let AST::Name(name) = **namet {
+                    let idx = self.compile(v);
+                    self.define(name.to_string(), idx);
+                    idx
+                } else {
+                    panic!()
+                }
+            }
+            AST::Dummy(_) => todo!(),
+            AST::Empty => todo!(),
+        }
+    }
+
+    fn push(&mut self, format: String) -> usize {
+        self.code.push(format);
+        self.code.len() - 1
+    }
+}
+
+pub fn compile_script(input_string: String) -> Result<ByteCode, Box<dyn std::error::Error>> {
+    let parse_trees = parse_script(input_string)?;
+    let mut o = ByteCode::new();
+    for t in parse_trees {
+        let ast = t.as_abstract_syntax_tree();
+        println!("-> {}", t.to_string());
+        println!("-> {:#?}", &ast);
+        o.compile(&ast);
     }
     Ok(o)
 }
@@ -256,7 +382,7 @@ impl Context {
                 info!("instantiate block");
                 let r = BlockReceiver::new(self.myself.clone(), params, temps, body.clone());
                 let map = self.receiver_names.lock().unwrap();
-                for (k,v) in map.iter() {
+                for (k, v) in map.iter() {
                     info!("push {} to block context", *k);
                     r.define(*k, v.clone());
                 }
