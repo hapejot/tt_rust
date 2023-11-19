@@ -68,7 +68,7 @@ impl Receiver for BlockReceiver {
                     if r.as_int().unwrap() > 0 {
                         break;
                     }
-                    let x = args[0].receive_message("value", &[]);
+                    let _x = args[0].receive_message("value", &[]);
                 }
                 NilReciever::get()
             }

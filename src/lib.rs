@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Display, rc::Rc, string};
+use std::{collections::BTreeMap, fmt::Display, rc::Rc};
 
 use parser::AST;
 use runtime::{
@@ -75,37 +75,93 @@ pub fn evaluate_script(
     Ok(o)
 }
 
-#[derive(Debug)]
-pub struct ByteCode {
-    code: Vec<String>,
-    stack: Vec<usize>,
-    names: Vec<(String, usize)>,
+#[derive(Debug, PartialEq, Clone)]
+pub struct CodeAddress(usize, usize);
+
+impl Display for CodeAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "r{}-{}", self.0, self.1)
+    }
 }
 
-impl Display for ByteCode {
+impl Copy for CodeAddress {}
+
+#[derive(Debug)]
+pub struct ByteCode {
+    result: Option<CodeAddress>,
+    opcode: Vec<String>,
+}
+
+impl ByteCode {
+    pub fn new() -> Self {
+        Self {
+            result: None,
+            opcode: vec![],
+        }
+    }
+
+    fn push(&mut self, code_str: String) -> usize {
+        self.opcode.push(code_str);
+        self.opcode.len() - 1
+    }
+
+    fn set_result(&mut self, addr: CodeAddress) {
+        self.result = Some(addr);
+    }
+
+    fn result(&self) -> Option<CodeAddress> {
+        self.result
+    }
+}
+
+#[derive(Debug)]
+pub struct CompiledMethod {
+    blocks: Vec<ByteCode>,
+    stack: Vec<CodeAddress>,
+    current_block: usize,
+    names: Vec<(String, CodeAddress)>,
+}
+
+impl Display for CompiledMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "ByteCode:")?;
-        for idx in 0..self.code.len() {
-            writeln!(f, "   r{} = {}", idx, self.code[idx])?
+        writeln!(f, "{:15}", "Compiled Method:")?;
+        for block_idx in 0..self.blocks.len() {
+            writeln!(f, "---")?;
+            let b = &self.blocks[block_idx];
+            match b.result() {
+                Some(addr) => writeln!(f, "{:15} {}", format!("Block {}", block_idx), addr)?,
+                None => writeln!(f, "{:15}", format!("Block {}", block_idx))?,
+            }            
+            for idx in 0..b.opcode.len() {
+                let addr = CodeAddress(block_idx, idx);
+                let name = {
+                    match self.names.iter().find(|x| x.1 == addr) {
+                        Some((k, _)) => k.as_str(),
+                        None => "",
+                    }
+                };
+                writeln!(f, "{:15} {} = {}", name, addr, b.opcode[idx])?
+            }
         }
         Ok(())
     }
 }
 
-impl ByteCode {
-    fn new() -> Self {
+impl CompiledMethod {
+    pub fn new() -> Self {
         Self {
-            code: vec![],
+            current_block: 0,
+            blocks: vec![ByteCode::new()],
             stack: vec![],
             names: vec![],
         }
     }
 
-    fn define(&mut self, name: String, idx: usize) {
+    pub fn define(&mut self, name: String, idx: CodeAddress) {
         self.names.push((name, idx));
     }
 
-    fn idx_for(&self, name: &str) -> Option<usize> {
+    fn idx_for(&self, name: &str) -> Option<CodeAddress> {
         let r = self.names.iter().find(|x| x.0 == name);
         match r {
             Some((_, v)) => Some(*v),
@@ -113,31 +169,42 @@ impl ByteCode {
         }
     }
 
-    fn compile(&mut self, ast: &AST) -> usize {
+    pub fn compile(&mut self, ast: &AST) -> CodeAddress {
         match ast {
             AST::Int(v) => self.push(format!("int {}", v)),
             AST::Char(v) => self.push(format!("chr {}", v)),
             AST::String(v) => self.push(format!("str {}", v)),
             AST::Name(_) => todo!(),
-            AST::Method {
-                name,
-                params,
-                temps,
-                body,
-            } => todo!(),
-            AST::Block {
-                params,
-                temps,
-                body,
-            } => {
-                self.compile(body)
-            },
-            AST::Return(_) => todo!(),
+            AST::Method { .. } => todo!(),
+            AST::Block { params, body, .. } => {
+                let old_block = self.current_block;
+                self.current_block = self.blocks.len();
+                self.blocks.push(ByteCode::new());
+
+                for param_idx in 0..params.len() {
+                    let idx = self.push(format!("arg{}", param_idx));
+                    self.define(params[param_idx].to_string(), idx);
+                }
+                self.compile(body);
+                let block = format!("Block {}", self.current_block);
+                if let Some(addr) = self.stack.pop() {
+                    let block = &mut self.blocks[self.current_block];
+                    block.set_result(addr);
+                }
+
+                self.current_block = old_block;
+                let result_idx = self.push(block);
+                result_idx
+            }
+            AST::Return(x) => {
+                let idx = self.compile(x);
+                self.push(format!("return {}", idx))
+            }
             AST::PatternPart(_, _, _) => todo!(),
             AST::List(_, _) => todo!(),
             AST::Table(_) => todo!(),
             AST::Statements(s) => {
-                let mut n = 0;
+                let mut n = CodeAddress(0, 0);
                 for stmt in s {
                     n = self.compile(stmt);
                 }
@@ -154,12 +221,16 @@ impl ByteCode {
             }
             AST::InvokeCascade(_, _) => todo!(),
             AST::Message { name, args } => {
-                let mut c = format!("{:?} invoke {}", self.stack.pop(), name);
-                for x in args {
-                    let n = self.compile(x);
-                    c.push_str(format!(" r{}", n).as_str());
+                if let Some(receiver_idx) = self.stack.pop() {
+                    let mut c = format!("{} invoke {}", receiver_idx, name);
+                    for x in args {
+                        let n = self.compile(x);
+                        c.push_str(format!(" {}", n).as_str());
+                    }
+                    self.push(c)
+                } else {
+                    panic!()
                 }
-                self.push(c)
             }
             AST::Variable(name) => match self.idx_for(*name) {
                 Some(idx) => idx,
@@ -183,15 +254,21 @@ impl ByteCode {
         }
     }
 
-    fn push(&mut self, format: String) -> usize {
-        self.code.push(format);
-        self.code.len() - 1
+    pub fn push(&mut self, code_str: String) -> CodeAddress {
+        let b = &mut self.blocks[self.current_block];
+        CodeAddress(self.current_block, b.push(code_str))
     }
 }
 
-pub fn compile_script(input_string: String) -> Result<ByteCode, Box<dyn std::error::Error>> {
+impl Default for CompiledMethod {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub fn compile_script(input_string: String) -> Result<CompiledMethod, Box<dyn std::error::Error>> {
     let parse_trees = parse_script(input_string)?;
-    let mut o = ByteCode::new();
+    let mut o = CompiledMethod::new();
     for t in parse_trees {
         let ast = t.as_abstract_syntax_tree();
         println!("-> {}", t.to_string());
