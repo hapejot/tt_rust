@@ -12,13 +12,13 @@ impl Receiver for StringMetaReceiver {
     fn receive_message(
         &self,
         selector: &'static str,
-        args: &[Rc<dyn Receiver>],
+        args: Vec<Rc<dyn Receiver>>,
     ) -> Rc<dyn Receiver> {
         match selector {
             "new:streamContents:" => {
                 let result = Rc::new(StringReceiver::new(String::new()));
                 let stream = Rc::new(StreamReceiver::new(result.clone()));
-                args[1].receive_message("value:", &[stream]);
+                args[1].receive_message("value:", vec![stream]);
                 result
             }
             _ => todo!("{}", selector),
@@ -42,7 +42,7 @@ impl Receiver for StringReceiver {
     fn receive_message(
         &self,
         selector: &'static str,
-        _args: &[Rc<dyn Receiver>],
+        _args: Vec<Rc<dyn Receiver>>,
     ) -> Rc<dyn Receiver> {
         match selector {
             "species" => Rc::new(StringMetaReceiver {}),
@@ -80,7 +80,7 @@ impl Receiver for StringReceiver {
                     let content = self.val.lock().unwrap();
                     content.clone()
                 };
-                _args[0].receive_message("write", &[Rc::new(StringReceiver::new(s))])
+                _args[0].receive_message("write", vec![Rc::new(StringReceiver::new(s))])
             }
             _ => self.execute_stored_method(selector),
         }

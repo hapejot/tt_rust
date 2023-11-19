@@ -13,7 +13,7 @@ impl<'a, 'b> Formatter<'a, 'b> {
 }
 
 impl Receiver for Formatter<'_, '_> {
-    fn receive_message(&self, selector: &'static str, _args: &[Rc<dyn Receiver>]) -> Rc<dyn Receiver> {
+    fn receive_message(&self, selector: &'static str, _args: Vec<Rc<dyn Receiver>>) -> Rc<dyn Receiver> {
         match selector {
             "write" => {
                 let mut f = self.f.lock().unwrap();

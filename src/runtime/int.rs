@@ -14,15 +14,19 @@ impl Receiver for IntReceiver {
     fn receive_message(
         &self,
         selector: &'static str,
-        args: &[Rc<dyn Receiver>],
+        args: Vec<Rc<dyn Receiver>>,
     ) -> Rc<dyn Receiver> {
         match selector {
-            "==" => Rc::new(IntReceiver::new(if self.0 == args[0].as_int().unwrap() {1} else {0} )),
+            "==" => Rc::new(IntReceiver::new(if self.0 == args[0].as_int().unwrap() {
+                1
+            } else {
+                0
+            })),
             "+" => Rc::new(IntReceiver(self.0 + args[0].as_int().unwrap())),
             "*" => Rc::new(IntReceiver(self.0 * args[0].as_int().unwrap())),
             "basic_write_to" => {
                 let a0 = StringReceiver::new(format!("{}", self.0));
-                args[0].receive_message("write", &[Rc::new(a0)])
+                args[0].receive_message("write", vec![Rc::new(a0)])
             }
             "@" => Rc::new(PointReceiver::new(self.0, args[0].as_int().unwrap())),
             _ => todo!("message '{}' for int", selector),

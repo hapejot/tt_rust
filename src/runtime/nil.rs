@@ -12,12 +12,12 @@ impl Receiver for NilReciever {
     fn receive_message(
         &self,
         selector: &'static str,
-        args: &[Rc<dyn Receiver>],
+        args: Vec<Rc<dyn Receiver>>,
     ) -> Rc<dyn Receiver> {
         match selector {
             "basic_write_to" => {
                 let a0 = StringReceiver::new(format!("Nil"));
-                args[0].receive_message("write", &[Rc::new(a0)])
+                args[0].receive_message("write", vec![Rc::new(a0)])
             }
             _ => todo!("implement {} for nil", selector),
         }

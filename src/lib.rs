@@ -75,9 +75,23 @@ pub fn evaluate_script(
     Ok(o)
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub struct CodeAddress(usize, usize);
 
+#[derive(Debug)]
+pub enum Operation {
+    Int(isize),
+    Str(String),
+    Invoke(String, CodeAddress, Vec<CodeAddress>),
+    Block(usize),
+    Global(String),
+    Char(char),
+    String(String),
+    Arg(usize),
+    Return(CodeAddress),
+    Param(usize),
+    Myself,
+}
 impl Display for CodeAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "r{}-{}", self.0, self.1)
@@ -89,7 +103,7 @@ impl Copy for CodeAddress {}
 #[derive(Debug)]
 pub struct ByteCode {
     result: Option<CodeAddress>,
-    opcode: Vec<String>,
+    opcode: Vec<Operation>,
 }
 
 impl ByteCode {
@@ -100,8 +114,8 @@ impl ByteCode {
         }
     }
 
-    fn push(&mut self, code_str: String) -> usize {
-        self.opcode.push(code_str);
+    fn push(&mut self, op: Operation) -> usize {
+        self.opcode.push(op);
         self.opcode.len() - 1
     }
 
@@ -122,6 +136,86 @@ pub struct CompiledMethod {
     names: Vec<(String, CodeAddress)>,
 }
 
+pub struct Frame {
+    ip: CodeAddress,
+    stack: Vec<CodeAddress>,
+    done: bool,
+    method: Rc<CompiledMethod>,
+    values: BTreeMap<CodeAddress, Rc<dyn Receiver>>,
+}
+
+impl Frame {
+    pub fn new(method: Rc<CompiledMethod>) -> Self {
+        Self {
+            ip: CodeAddress(0, 0),
+            stack: vec![],
+            done: false,
+            method,
+            values: BTreeMap::new(),
+        }
+    }
+
+    pub fn run(&mut self) -> Rc<dyn Receiver> {
+        while !self.done {
+            self.process_step();
+        }
+        match self.method.blocks[0].result {
+            Some(result_addr) => match self.values.get(&result_addr) {
+                Some(v) => v.clone(),
+                None => panic!("value {} undefined.", result_addr),
+            },
+            None => todo!(),
+        }
+    }
+
+    fn process_step(&mut self) {
+        let CodeAddress(block, step) = self.ip;
+        let op = &self.method.blocks[block].opcode[step];
+        println!("{:?}", op);
+        let v: Rc<dyn Receiver> = match op {
+            Operation::Int(v) => Rc::new(IntReceiver::new(*v)),
+            Operation::Str(v) => todo!(),
+            Operation::Invoke(selector, receiver, args) => {
+                let receiver = self.get_value(receiver);
+                let args = self.get_values(args);
+                let r = receiver.receive_message(SelectorSet::get(selector), args);
+                r
+            }
+            Operation::Block(b) => {
+                self.stack.push(self.ip);
+                self.ip = CodeAddress(*b, 0);
+                let r = self.run();
+                self.ip = self.stack.pop().unwrap();
+                r
+            }
+            Operation::Global(_) => todo!(),
+            Operation::Char(v) => Rc::new(IntReceiver::new(*v as isize)),
+            Operation::String(v) => Rc::new(StringReceiver::new(v.clone())),
+            Operation::Arg(_) => todo!(),
+            Operation::Return(_) => todo!(),
+            Operation::Param(_) => todo!(),
+            Operation::Myself => todo!(),
+        };
+        self.values.insert(self.ip, v);
+
+        if step + 1 < self.method.blocks[block].opcode.len() {
+            self.ip = CodeAddress(block, step + 1);
+        } else {
+            self.done = true;
+        }
+    }
+
+    fn get_values(&self, args: &Vec<CodeAddress>) -> Vec<Rc<dyn Receiver>> {
+        args.iter()
+            .map(|x| self.values.get(x).unwrap().clone())
+            .collect::<Vec<_>>()
+    }
+
+    fn get_value(&self, receiver: &CodeAddress) -> Rc<dyn Receiver> {
+        self.values.get(receiver).unwrap().clone()
+    }
+}
+
 impl Display for CompiledMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{:15}", "Compiled Method:")?;
@@ -131,7 +225,7 @@ impl Display for CompiledMethod {
             match b.result() {
                 Some(addr) => writeln!(f, "{:15} {}", format!("Block {}", block_idx), addr)?,
                 None => writeln!(f, "{:15}", format!("Block {}", block_idx))?,
-            }            
+            }
             for idx in 0..b.opcode.len() {
                 let addr = CodeAddress(block_idx, idx);
                 let name = {
@@ -140,7 +234,7 @@ impl Display for CompiledMethod {
                         None => "",
                     }
                 };
-                writeln!(f, "{:15} {} = {}", name, addr, b.opcode[idx])?
+                writeln!(f, "{:15} {} = {:?}", name, addr, b.opcode[idx])?
             }
         }
         Ok(())
@@ -171,22 +265,20 @@ impl CompiledMethod {
 
     pub fn compile(&mut self, ast: &AST) -> CodeAddress {
         match ast {
-            AST::Int(v) => self.push(format!("int {}", v)),
-            AST::Char(v) => self.push(format!("chr {}", v)),
-            AST::String(v) => self.push(format!("str {}", v)),
-            AST::Name(_) => todo!(),
-            AST::Method { .. } => todo!(),
+            AST::Int(v) => self.push(Operation::Int(*v)),
+            AST::Char(v) => self.push(Operation::Char(*v)),
+            AST::String(v) => self.push(Operation::String(v.to_string())),
             AST::Block { params, body, .. } => {
                 let old_block = self.current_block;
                 self.current_block = self.blocks.len();
                 self.blocks.push(ByteCode::new());
 
                 for param_idx in 0..params.len() {
-                    let idx = self.push(format!("arg{}", param_idx));
+                    let idx = self.push(Operation::Arg(param_idx));
                     self.define(params[param_idx].to_string(), idx);
                 }
                 self.compile(body);
-                let block = format!("Block {}", self.current_block);
+                let block = Operation::Block(self.current_block);
                 if let Some(addr) = self.stack.pop() {
                     let block = &mut self.blocks[self.current_block];
                     block.set_result(addr);
@@ -198,11 +290,8 @@ impl CompiledMethod {
             }
             AST::Return(x) => {
                 let idx = self.compile(x);
-                self.push(format!("return {}", idx))
+                self.push(Operation::Return(idx))
             }
-            AST::PatternPart(_, _, _) => todo!(),
-            AST::List(_, _) => todo!(),
-            AST::Table(_) => todo!(),
             AST::Statements(s) => {
                 let mut n = CodeAddress(0, 0);
                 for stmt in s {
@@ -217,16 +306,18 @@ impl CompiledMethod {
                     n = self.compile(x);
                     self.stack.push(n);
                 }
+                self.blocks[self.current_block].result = Some(n);
                 n
             }
-            AST::InvokeCascade(_, _) => todo!(),
             AST::Message { name, args } => {
                 if let Some(receiver_idx) = self.stack.pop() {
-                    let mut c = format!("{} invoke {}", receiver_idx, name);
+                    let mut argv = vec![];
+
                     for x in args {
                         let n = self.compile(x);
-                        c.push_str(format!(" {}", n).as_str());
+                        argv.push(n);
                     }
+                    let c = Operation::Invoke(name.to_string(), receiver_idx, argv);
                     self.push(c)
                 } else {
                     panic!()
@@ -235,7 +326,7 @@ impl CompiledMethod {
             AST::Variable(name) => match self.idx_for(*name) {
                 Some(idx) => idx,
                 None => {
-                    let idx = self.push(format!("global {}", name));
+                    let idx = self.push(Operation::Global(name.to_string()));
                     self.define(name.to_string(), idx);
                     idx
                 }
@@ -249,14 +340,13 @@ impl CompiledMethod {
                     panic!()
                 }
             }
-            AST::Dummy(_) => todo!(),
-            AST::Empty => todo!(),
+            _ => todo!(),
         }
     }
 
-    pub fn push(&mut self, code_str: String) -> CodeAddress {
+    pub fn push(&mut self, op: Operation) -> CodeAddress {
         let b = &mut self.blocks[self.current_block];
-        CodeAddress(self.current_block, b.push(code_str))
+        CodeAddress(self.current_block, b.push(op))
     }
 }
 
@@ -437,7 +527,7 @@ impl Context {
                                 }
                             }
                         }
-                        receiver = receiver.receive_message(name, oargs.as_slice());
+                        receiver = receiver.receive_message(name, oargs);
                     }
                 }
                 receiver

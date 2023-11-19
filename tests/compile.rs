@@ -1,6 +1,8 @@
-use std::{fs::File, io::Read, path::Path};
+use std::{fs::File, io::Read, path::Path, rc::Rc};
 
-use tt_rust::{compile_script, parse_method, parser::AST::Method, CompiledMethod, TRACING};
+use tt_rust::{
+    compile_script, parse_method, parser::AST::Method, CompiledMethod, Frame, Operation, TRACING,
+};
 
 #[test]
 fn compile_to_7() {
@@ -11,6 +13,9 @@ fn compile_to_7() {
     ))
     .unwrap();
     println!("{}", code);
+    let mut f = Frame::new(Rc::new(code));
+    let r = f.run();
+    assert_eq!(Some(7), r.as_int());
 }
 
 #[test]
@@ -22,6 +27,9 @@ fn compile_to_points() {
     ))
     .unwrap();
     println!("{}", code);
+    let mut f = Frame::new(Rc::new(code));
+    let r = format!("{}", f.run());
+    assert_eq!("400@600", r);
 }
 
 #[test]
@@ -34,6 +42,9 @@ fn compile_block() {
     ))
     .unwrap();
     println!("{}", code);
+    let mut f = Frame::new(Rc::new(code));
+    let r = format!("{}", f.run());
+    assert_eq!("X", r);
 }
 
 #[test]
@@ -68,10 +79,10 @@ fn compile_stored_method() {
     match m {
         Method { body, params, .. } => {
             let mut code = CompiledMethod::new();
-            let addr = code.push("self".into());
+            let addr = code.push(Operation::Myself);
             code.define("self".into(), addr);
             for idx in 0..params.len() {
-                let addr = code.push(format!("param {}", idx));
+                let addr = code.push(Operation::Param(idx));
                 code.define(params[idx].to_string(), addr);
             }
             let _idx = code.compile(&body);

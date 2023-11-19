@@ -20,9 +20,8 @@ impl Receiver for StreamReceiver {
     fn receive_message(
         &self,
         selector: &'static str,
-        args: &[Rc<dyn Receiver>],
+        args: Vec<Rc<dyn Receiver>>,
     ) -> Rc<dyn Receiver> {
-        let _ = (self.buf.clone(), args);
         match selector {
             "next" => {
                 let idxobj;
@@ -32,7 +31,7 @@ impl Receiver for StreamReceiver {
                     *idx += 1;
                 }
                 self.buf
-                    .receive_message("basicAt:", &[idxobj])
+                    .receive_message("basicAt:", vec![idxobj])
             }
             "nextPut:" => {
                 let idxobj;
@@ -42,10 +41,10 @@ impl Receiver for StreamReceiver {
                     *idx += 1;
                 }
                 self.buf
-                    .receive_message("basicAt:put:", &[idxobj, args[0].clone()])
+                    .receive_message("basicAt:put:", vec![idxobj, args[0].clone()])
             }
             "atEnd" => {
-                let n = self.buf.receive_message("size", &[]);
+                let n = self.buf.receive_message("size", vec![]);
                 {
                     let idx = self.idx.lock().unwrap();
                     if *idx < n.as_int().unwrap() {

@@ -54,8 +54,8 @@ fn points_2() {
     b <- 300 @ 400. 
     Point x: a x + b y y: a y + b x.")).unwrap();
     SelectorSet::stats();
-    assert_eq!(o.receive_message("x", &[]).as_int(), Some(500));
-    assert_eq!(o.receive_message("y", &[]).as_int(), Some(500));
+    assert_eq!(o.receive_message("x", vec![]).as_int(), Some(500));
+    assert_eq!(o.receive_message("y", vec![]).as_int(), Some(500));
 }
 
 
@@ -64,8 +64,8 @@ fn points_1() {
     assert!(TRACING.clone());
     let o = evaluate_script(String::from("a := 100 @ 200. b <- 300 @ 400. a + b.")).unwrap();
     SelectorSet::stats();
-    assert_eq!(o.receive_message("x", &[]).as_int(), Some(400));
-    assert_eq!(o.receive_message("y", &[]).as_int(), Some(600));
+    assert_eq!(o.receive_message("x", vec![]).as_int(), Some(400));
+    assert_eq!(o.receive_message("y", vec![]).as_int(), Some(600));
 }
 
 

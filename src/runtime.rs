@@ -93,7 +93,7 @@ pub trait Receiver {
     fn receive_message(
         &self,
         selector: &'static str,
-        args: &[Rc<dyn Receiver>],
+        args: Vec<Rc<dyn Receiver>>,
     ) -> Rc<dyn Receiver>;
 
     fn as_int(&self) -> Option<isize>;
@@ -104,7 +104,7 @@ impl Display for dyn Receiver {
     fn fmt<'b>(&self, f: &mut std::fmt::Formatter<'b>) -> std::fmt::Result {
         // let fmt = Rc::new(fmt::Formatter::new(f));
         let fmt = Rc::new(StringReceiver::new(String::new()));
-        self.receive_message("basic_write_to", &[fmt.clone()]);
+        self.receive_message("basic_write_to", vec![fmt.clone()]);
         write!(f, "{}", fmt.as_str().unwrap())?;
         Ok(())
     }

@@ -37,9 +37,9 @@ impl Receiver for BlockReceiver {
     fn receive_message(
         &self,
         selector: &'static str,
-        args: &[Rc<dyn Receiver>],
+        args: Vec<Rc<dyn Receiver>>,
     ) -> std::rc::Rc<dyn Receiver> {
-        let _ = (args, &self.params, &self.temps, &self.body);
+        let _ = (&self.params, &self.temps, &self.body);
         match selector {
             "value:value:" => {
                 let mut ctx = self.ctx.lock().unwrap();
@@ -68,13 +68,13 @@ impl Receiver for BlockReceiver {
                     if r.as_int().unwrap() > 0 {
                         break;
                     }
-                    let _x = args[0].receive_message("value", &[]);
+                    let _x = args[0].receive_message("value", vec![]);
                 }
                 NilReciever::get()
             }
             "basic_write_to" => {
                 let a0 = StringReceiver::new(format!("[{:?}]", self.params));
-                args[0].receive_message("write", &[Rc::new(a0)])
+                args[0].receive_message("write", vec![Rc::new(a0)])
             }
             _ => todo!("selector {}", selector),
         }
