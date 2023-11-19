@@ -182,16 +182,16 @@ impl Frame {
                 r
             }
             Operation::Block(b) => {
-                self.stack.push(self.ip);
-                self.ip = CodeAddress(*b, 0);
-                let r = self.run();
-                self.ip = self.stack.pop().unwrap();
+                let r = Rc::new(CompiledBlockReceiver::new(
+                    CodeAddress(*b, 0),
+                    self.clone(),
+                ));
                 r
             }
             Operation::Global(_) => todo!(),
             Operation::Char(v) => Rc::new(IntReceiver::new(*v as isize)),
             Operation::String(v) => Rc::new(StringReceiver::new(v.clone())),
-            Operation::Arg(_) => todo!(),
+            Operation::Arg(v) => todo!(),
             Operation::Return(_) => todo!(),
             Operation::Param(_) => todo!(),
             Operation::Myself => todo!(),
@@ -353,6 +353,37 @@ impl CompiledMethod {
 impl Default for CompiledMethod {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub struct CompiledBlockReceiver {
+    start: CodeAddress,
+    meth: Rc<Frame>,
+}
+
+impl CompiledBlockReceiver {
+    pub fn new(start: CodeAddress, meth: Rc<Frame>) -> Self {
+        Self { start, meth }
+    }
+}
+
+impl Receiver for CompiledBlockReceiver {
+    fn receive_message(
+        &self,
+        selector: &'static str,
+        args: Vec<Rc<dyn Receiver>>,
+    ) -> Rc<dyn Receiver> {
+        match selector {
+            s => todo!("doesn't understand {}", s)
+        }
+    }
+
+    fn as_int(&self) -> Option<isize> {
+        todo!()
+    }
+
+    fn as_str(&self) -> Option<&'static str> {
+        todo!()
     }
 }
 
