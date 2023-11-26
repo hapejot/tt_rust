@@ -4,7 +4,7 @@ use tracing::info;
 
 use crate::{parse_method, parser::AST, runtime::stm::StreamReceiver, Context};
 
-use super::{int::IntReceiver, sel::SelectorSet, Receiver};
+use super::{int::IntReceiver, sel::SelectorSet, Receiver, chr::CharReceiver};
 
 pub struct StringMetaReceiver {}
 
@@ -56,17 +56,14 @@ impl Receiver for StringReceiver {
                 let s = self.val.lock().unwrap();
                 let idx = _args[0].as_int().unwrap();
                 let c = s.chars().nth(idx as usize).unwrap();
-                Rc::new(IntReceiver::new(c as isize))
+                Rc::new(CharReceiver::new(c))
             }
             "basicAt:put:" => {
                 let result = _args[1].clone();
                 {
                     let mut s = self.val.lock().unwrap();
                     let idx = _args[0].as_int().unwrap();
-                    s.insert(
-                        idx as usize,
-                        char::from_u32(result.as_int().unwrap() as u32).unwrap(),
-                    );
+                    s.insert_str(idx as usize, result.as_str().unwrap());
                 }
                 result
             }
@@ -82,7 +79,7 @@ impl Receiver for StringReceiver {
                 };
                 _args[0].receive_message("write", vec![Rc::new(StringReceiver::new(s))])
             }
-            _ => self.execute_stored_method(selector),
+            _ => self.execute_stored_method(selector, _args),
         }
 
         // todo!("implement {} for str", selector)
@@ -106,7 +103,11 @@ impl StringReceiver {
         }
     }
 
-    fn execute_stored_method(&self, selector: &str) -> Rc<dyn Receiver> {
+    fn execute_stored_method(
+        &self,
+        selector: &str,
+        args: Vec<Rc<dyn Receiver>>,
+    ) -> Rc<dyn Receiver> {
         let p = format!("defs/string/{}", selector).replace(r":", "_");
         let p = Path::new(&p);
         if !p.exists() {
@@ -134,6 +135,9 @@ impl StringReceiver {
                 info!("params: {:?}", params);
                 info!("temps: {:?}", temps);
                 // trace!("AST: {:#?}", &body);
+                for idx in 0..params.len() {
+                    ctx.set_receiver(params[idx], args[idx].clone());
+                }
                 ctx.eval_to_reciever(&body)
             }
             _ => todo!("I only know how to deal with a method."),

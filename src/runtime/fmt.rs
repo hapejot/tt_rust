@@ -25,10 +25,10 @@ impl Receiver for Formatter<'_, '_> {
     }
 
     fn as_int(&self) -> Option<isize> {
-        None
+        todo!()
     }
 
     fn as_str(&self) -> Option<&'static str> {
-        None
+        todo!()
     }
 }

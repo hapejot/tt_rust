@@ -4,7 +4,7 @@ use tt_rust::{evaluate_script, runtime::sel::SelectorSet, TRACING};
 fn string_format() {
     assert!(TRACING.clone());
     let o = evaluate_script(String::from("
-    'Five is {1}.' format: 1 + 4.
+    'Five is {0}.' format: {1 + 4}.
     ")).unwrap();
     SelectorSet::stats();
     assert_eq!(o.as_str(), Some("Five is 5."));

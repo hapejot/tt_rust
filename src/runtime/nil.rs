@@ -24,10 +24,10 @@ impl Receiver for NilReciever {
     }
 
     fn as_int(&self) -> Option<isize> {
-        None
+        todo!()
     }
     fn as_str(&self) -> Option<&'static str> {
-        None
+        todo!()
     }
 }
 // pub static NIL_RECIEVER: Lazy<Rc<dyn Receiver>> = Lazy::new(|| Rc::new(NilReciever));

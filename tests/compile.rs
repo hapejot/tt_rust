@@ -1,7 +1,10 @@
-use std::{fs::File, io::Read, path::Path, rc::Rc};
+use std::{fs::File, io::Read, path::Path};
 
 use tt_rust::{
-    compile_script, parse_method, parser::AST::Method, CompiledMethod, Frame, Operation, TRACING,
+    code::{compile_script, CompiledMethod, Operation},
+    parse_method,
+    parser::AST::Method,
+    ContextRef, MethodContext, TRACING,
 };
 
 #[test]
@@ -13,8 +16,8 @@ fn compile_to_7() {
     ))
     .unwrap();
     println!("{}", code);
-    let mut f = Frame::new(Rc::new(code));
-    let r = f.run();
+    let f: ContextRef = MethodContext::new();
+    let r = code.run(f);
     assert_eq!(Some(7), r.as_int());
 }
 
@@ -27,8 +30,8 @@ fn compile_to_points() {
     ))
     .unwrap();
     println!("{}", code);
-    let mut f = Frame::new(Rc::new(code));
-    let r = format!("{}", f.run());
+    let f = MethodContext::new();
+    let r = format!("{}", code.run(f));
     assert_eq!("400@600", r);
 }
 
@@ -37,14 +40,58 @@ fn compile_block() {
     assert!(TRACING.clone());
     let code = compile_script(String::from(
         "
-    '' species new: 10 streamContents: [ :result | result nextPut: $X ].
-    ",
+        '' species new: 10 streamContents: [ :result | result nextPut: $X ].
+        ",
     ))
     .unwrap();
     println!("{}", code);
-    let mut f = Frame::new(Rc::new(code));
-    let r = format!("{}", f.run());
+    let f = MethodContext::new();
+    let r = format!("{}", code.run(f));
     assert_eq!("X", r);
+}
+
+#[test]
+fn parse_binary() {
+    assert!(TRACING.clone());
+    let code = compile_script(String::from("^1 < 2")).unwrap();
+    println!("{}", code);
+    let f = MethodContext::new();
+    let r = format!("{}", code.run(f));
+    assert_eq!("True", r);
+}
+
+#[test]
+fn compile_if_true() {
+    assert!(TRACING.clone());
+    let code = compile_script(String::from(
+        "
+        a := 1.
+        a < 2 ifTrue: [a := 3].
+        ^a
+        ",
+    ))
+    .unwrap();
+    println!("{}", code);
+    let f = MethodContext::new();
+    let r = code.run(f).as_int();
+    assert_eq!(Some(3), r);
+}
+
+#[test]
+fn compile_if_false() {
+    assert!(TRACING.clone());
+    let code = compile_script(String::from(
+        "
+        a := 1.
+        a > 2 ifFalse: [a := 3].
+        ^a
+        ",
+    ))
+    .unwrap();
+    println!("{}", code);
+    let f = MethodContext::new();
+    let r = code.run(f).as_int();
+    assert_eq!(Some(3), r);
 }
 
 #[test]
@@ -58,6 +105,9 @@ fn compile_to_more_points() {
     ))
     .unwrap();
     println!("{}", code);
+    // let f = MethodContext::new();
+    // let r = format!("{}", code.run(f));
+    // assert_eq!("True", r);
 }
 
 #[test]

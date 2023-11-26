@@ -10,23 +10,21 @@ pub fn lexer_rules() -> LexerRules {
          // "DEFAULT" | "LOCAL" = pattern r":[a-zA-Z_][a-zA-Z_0-9]*";
         "DEFAULT" | "COMMENT" = pattern "\"[^\"]*\"" => |l| l.skip();
         "DEFAULT" | ":" = string ":";
-        // "DEFAULT" | "BINARY" = string "+";
-        // "DEFAULT" | "BINARY" = string "-";
-        // "DEFAULT" | "BINARY" = string "*";
-        // "DEFAULT" | "/" = string "/";
         "DEFAULT" | "END_OF_CHUNK" = string "!";
-        "DEFAULT" | "^" = string "^";
         "DEFAULT" | "." = string ".";
         "DEFAULT" | "[" = string "[";
         "DEFAULT" | "]" = string "]";
         "DEFAULT" | "(" = string "(";
         "DEFAULT" | ")" = string ")";
         "DEFAULT" | "|" = string "|";
+        "DEFAULT" | "{" = string "{";
+        "DEFAULT" | "}" = string "}";
         "DEFAULT" | "ASSIGN" = string ":=";
         "DEFAULT" | "ASSIGN" = string "<-";
-        "DEFAULT" | "BINARY" = pattern r"[=+\-*/@]+";
+        "DEFAULT" | "BINARY" = pattern r"[-%&,*+/<=>?@\~!]+";
         "DEFAULT" | "CHAR" = pattern r"\$.";
         "DEFAULT" | "WS" = pattern r"\s" => |lexer| lexer.skip();
+        "DEFAULT" | "RETURN" = string "^";
     )
 }
 
@@ -175,7 +173,8 @@ pub fn grammar() -> Grammar<AST> {
     santiago::grammar!(
         "cmd" => rules "define_cmd" "def";
         "cmd" => rules "method_cmd" "method definition" => |r:Vec<AST>| r[1].clone();
-        "cmd" => rules "eval_cmd" "statements" "dot" => |r:Vec<AST>| r[1].clone();
+        "cmd" => rules "eval_cmd" "statements" => |r:Vec<AST>| r[1].clone();
+        "cmd" => rules "eval_cmd" "statements" "dot"=> |r:Vec<AST>| r[1].clone();
 
         "def" => rules "method definition";
         "def" => empty => |_| AST::Empty;
@@ -199,7 +198,8 @@ pub fn grammar() -> Grammar<AST> {
             => |r| AST::PatternPart((&r[0]).into(), Some(r[1].clone().into()), Box::new(AST::Empty));
         "keyword pattern" => rules "keyword"  "identifier" "keyword pattern"
             => |r| AST::PatternPart((&r[0]).into(), Some(r[1].clone().into()), Box::new(r[2].clone()));
-        "statements" => empty => |_| AST::Statements(vec![]);
+        "statements" => rules "expression"
+            => |r| {  AST::Statements(vec![r[0].clone()])  };
         "statements" => rules "return statement" => |r| AST::Statements(vec![r[0].clone()]);
         "statements" => rules "return statement" "dot" => |r| AST::Statements(vec![r[0].clone()]);
         "statements" => rules "expression" "dot" "statements"
@@ -213,7 +213,7 @@ pub fn grammar() -> Grammar<AST> {
                 AST::Statements(vec![r[0].clone()])
             }
         };
-        "statements" => rules "expression" => |r| AST::Statements(vec![r[0].clone()]);
+        // "statements" => rules "expression" => |r| AST::Statements(vec![r[0].clone()]);
         "return statement" => rules "return op" "expression"
             => |r| AST::Return(Box::new(r[1].clone()));
         "expression" => rules "basic expression" => |r| r[0].clone();
@@ -324,15 +324,19 @@ pub fn grammar() -> Grammar<AST> {
                                     Box::new(AST::Empty))};
         "keyword argument" => rules "binary expression"
             => |r| r[0].clone();
-        "primary" => lexemes "STRING" => |l| AST::String(SelectorSet::get(&l[0].raw));
+        "primary" => lexemes "STRING" => |l| {
+            let s = &l[0].raw;
+            let s0 = &s[1..s.len()-1];
+            AST::String(SelectorSet::get(s0))};
         "primary" => lexemes "IDENTIFIER" => |l| AST::Variable(SelectorSet::get(&l[0].raw));
-        "primary" => lexemes "CHAR" => |l| if let Some(c) = l[0].raw.chars().nth(1) { 
+        "primary" => lexemes "CHAR" => |l| if let Some(c) = l[0].raw.chars().nth(1) {
                 AST::Char(c)
             } else {
                 AST::Empty
             };
         "primary" => lexemes "INT" => |l| AST::Int(l[0].raw.to_string().parse::<isize>().unwrap());
         "primary" => rules "block constructor" => |r| r[0].clone();
+        "primary" => rules "openBrace" "expression" "closeBrace" => |r| AST::Table(vec![Box::new(r[1].clone())]);
         "primary" => rules "openParen" "expression" "closeParen" => |r| r[1].clone();
         "block constructor" => rules "blockStart" "block args" "temporaries" "block body" "blockEnd"
             => |r| AST::Block{
@@ -357,7 +361,7 @@ pub fn grammar() -> Grammar<AST> {
             };
         "block body" => rules "statements" => |r| r[0].clone();
         "dot" => lexemes "." => |_| AST::Empty;
-        "return op" => lexemes "^" => |_| AST::Empty;
+        "return op" => lexemes "RETURN" => |_| AST::Empty;
         "unarySelector" => lexemes "IDENTIFIER" => |l| AST::Name(SelectorSet::get(&l[0].raw));
         "identifier" => lexemes "IDENTIFIER" => |l| AST::Name(SelectorSet::get(&l[0].raw));
         "binarySelector" => lexemes "BINARY" => |l| AST::Name(SelectorSet::get(&l[0].raw));
@@ -369,6 +373,8 @@ pub fn grammar() -> Grammar<AST> {
         "bar" => lexemes "|" => |_| AST::Empty;
         "openParen" => lexemes "(" => |_| AST::Empty;
         "closeParen" => lexemes ")" => |_| AST::Empty;
+        "openBrace" => lexemes "{" => |_| AST::Empty;
+        "closeBrace" => lexemes "}" => |_| AST::Empty;
         "define_cmd" => lexemes "DEFINE" => |_| AST::Empty;
         "eval_cmd" => lexemes "EVALUATE" => |_| AST::Empty;
         "method_cmd" => lexemes "METHOD" => |_| AST::Empty;

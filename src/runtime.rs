@@ -6,6 +6,9 @@ pub mod pnt;
 pub mod sel;
 pub mod str;
 pub mod stm;  // stream
+pub mod chr;
+pub mod boo;
+pub mod arr;
 
 use std::{
     fmt::Display,
@@ -227,7 +230,7 @@ impl ObjectInternals for Object {
         if let Some(Literal::String(s)) = &x.literal {
             Some(s.into())
         } else {
-            None
+            todo!()
         }
     }
 }

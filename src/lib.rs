@@ -1,9 +1,16 @@
-use std::{collections::BTreeMap, fmt::Display, rc::Rc};
+use std::{collections::BTreeMap, fmt::Display, rc::Rc, sync::Arc};
 
+use code::CodeAddress;
 use parser::AST;
 use runtime::{
-    blk::BlockReceiver, int::IntReceiver, nil::NilReciever, pnt::PointMetaReceiver,
-    sel::SelectorSet, str::StringReceiver, Object, ObjectPtr, Receiver,
+    arr::ArrayReceiver,
+    blk::BlockReceiver,
+    int::{IntMetaReceiver, IntReceiver},
+    nil::NilReciever,
+    pnt::PointMetaReceiver,
+    sel::SelectorSet,
+    str::StringReceiver,
+    Object, ObjectPtr, Receiver, chr::CharReceiver,
 };
 
 use santiago::{
@@ -15,6 +22,7 @@ use tracing::info;
 
 use once_cell::sync::Lazy;
 
+pub mod code;
 pub mod controls;
 pub mod data;
 pub mod dbx;
@@ -43,6 +51,36 @@ pub fn init_tracing() -> bool {
 struct AppError {
     msg: Box<dyn std::fmt::Display>,
 }
+
+#[derive(Clone)]
+pub struct MethodContext(Arc<FrameData>);
+
+pub struct BlockContext {
+    // start: CodeAddress,
+    parent: ContextRef,
+    // params: Mutex<Vec<Rc<dyn Receiver>>>,
+}
+
+// pub struct Frame(Mutex<FrameData>);
+
+pub struct FrameData {
+    instruction_pointer: Mutex<CodeAddress>,
+    // stack: Vec<CodeAddress>,
+    // done: bool,
+    // method: Rc<CompiledMethod>,
+    values: Mutex<BTreeMap<CodeAddress, Rc<dyn Receiver>>>,
+}
+
+struct Context {
+    receiver_names: Mutex<BTreeMap<&'static str, Rc<dyn Receiver>>>,
+    myself: Rc<dyn Receiver>,
+}
+
+pub type ContextRef = Rc<dyn ContextTrait>;
+
+// pub struct ContextRef {
+//     ctx: Rc<dyn ContextTrait>,
+// }
 
 impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -75,328 +113,222 @@ pub fn evaluate_script(
     Ok(o)
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
-pub struct CodeAddress(usize, usize);
-
-#[derive(Debug)]
-pub enum Operation {
-    Int(isize),
-    Str(String),
-    Invoke(String, CodeAddress, Vec<CodeAddress>),
-    Block(usize),
-    Global(String),
-    Char(char),
-    String(String),
-    Arg(usize),
-    Return(CodeAddress),
-    Param(usize),
-    Myself,
+pub trait ContextTrait {
+    fn ip(&self) -> CodeAddress;
+    fn next_ip(&self);
+    fn call(&self, addr: CodeAddress);
+    fn get_value(&self, addr: &CodeAddress) -> Rc<dyn Receiver>;
+    fn get_values(&self, addrs: &[CodeAddress]) -> Vec<Rc<dyn Receiver>>;
+    fn set_value(&self, addr: &CodeAddress, value: Rc<dyn Receiver>);
 }
-impl Display for CodeAddress {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "r{}-{}", self.0, self.1)
+
+impl ContextTrait for BlockContext {
+    fn ip(&self) -> CodeAddress {
+        self.parent.ip()
+    }
+
+    fn next_ip(&self) {
+        self.parent.next_ip()
+    }
+
+    fn get_value(&self, addr: &CodeAddress) -> Rc<dyn Receiver> {
+        self.parent.get_value(addr)
+    }
+
+    fn get_values(&self, addrs: &[CodeAddress]) -> Vec<Rc<dyn Receiver>> {
+        self.parent.get_values(addrs)
+    }
+
+    fn set_value(&self, addr: &CodeAddress, value: Rc<dyn Receiver>) {
+        self.parent.set_value(addr, value);
+    }
+
+    fn call(&self, addr: CodeAddress) {
+        self.parent.call(addr)
     }
 }
 
-impl Copy for CodeAddress {}
+// impl Frame {
+//     pub fn lock(&self) -> MutexGuard<'_, FrameData> {
+//         match self.0.try_lock() {
+//             Ok(l) => l,
+//             Err(e) => {
+//                 println!("try lock: {}", e);
+//                 panic!();
+//             },
+//         }
+//     }
+// }
 
-#[derive(Debug)]
-pub struct ByteCode {
-    result: Option<CodeAddress>,
-    opcode: Vec<Operation>,
+impl ContextTrait for MethodContext {
+    fn ip(&self) -> CodeAddress {
+        self.0.instruction_pointer.lock().unwrap().clone()
+    }
+
+    fn next_ip(&self) {
+        let ip = &mut self.0.instruction_pointer.lock().unwrap();
+        ip.1 += 1;
+    }
+
+    fn get_value(&self, addr: &CodeAddress) -> Rc<dyn Receiver> {
+        let vs = self.0.values.lock().unwrap();
+        match vs.get(addr) {
+            Some(val) => val.clone(),
+            None => panic!("undefined value {}", addr),
+        }
+    }
+
+    fn get_values(&self, addrs: &[CodeAddress]) -> Vec<Rc<dyn Receiver>> {
+        let mut result = vec![];
+        let vs = self.0.values.lock().unwrap();
+        for addr in addrs {
+            result.push(vs.get(addr).unwrap().clone());
+        }
+        result
+    }
+
+    fn set_value(&self, addr: &CodeAddress, value: Rc<dyn Receiver>) {
+        let vs = &mut self.0.values.lock().unwrap();
+        vs.insert(addr.clone(), value);
+    }
+
+    fn call(&self, addr: CodeAddress) {
+        let ip = &mut self.0.instruction_pointer.lock().unwrap();
+        **ip = addr;
+    }
 }
 
-impl ByteCode {
+impl MethodContext {
+    pub fn new() -> ContextRef {
+        let c1 = MethodContext(Arc::new(FrameData::new()));
+        let ctx: Rc<dyn ContextTrait> = Rc::new(c1);
+        ctx
+    }
+
+    fn done(&self) -> bool {
+        (*self.0).done()
+    }
+
+    fn set_ip(&self, start: CodeAddress) -> CodeAddress {
+        (*self.0).set_ip(start)
+    }
+
+    fn result(&self, idx: usize) -> Rc<dyn Receiver> {
+        self.0.result(idx)
+    }
+}
+
+impl FrameData {
     pub fn new() -> Self {
         Self {
-            result: None,
-            opcode: vec![],
+            instruction_pointer: Mutex::new(CodeAddress(0, 0)),
+            values: Mutex::new(BTreeMap::new()),
         }
     }
 
-    fn push(&mut self, op: Operation) -> usize {
-        self.opcode.push(op);
-        self.opcode.len() - 1
-    }
+    // pub fn run(&mut self) -> Rc<dyn Receiver> {
+    //     while !self.done {
+    //         self.process_step();
+    //     }
+    //     match self.method.blocks[0].result {
+    //         Some(result_addr) => match self.values.get(&result_addr) {
+    //             Some(v) => v.clone(),
+    //             None => panic!("value {} undefined.", result_addr),
+    //         },
+    //         None => todo!(),
+    //     }
+    // }
 
-    fn set_result(&mut self, addr: CodeAddress) {
-        self.result = Some(addr);
-    }
+    // fn process_step(&self, method_context: ContextRef) {
+    //     let op;
+    //     let block;
+    //     let step;
+    //     {
+    //         let CodeAddress(ip_block, ip_step) = *self.ip.try_lock().unwrap();
+    //         block = ip_block;
+    //         step = ip_step;
+    //         op = &self.method.blocks[block].opcode[step];
+    //         println!("{:?}", op);
+    //     }
+    //     let v: Rc<dyn Receiver> = match op {
+    //         Operation::Int(v) => Rc::new(IntReceiver::new(*v)),
+    //         Operation::Str(_) => todo!(),
+    //         Operation::Invoke(selector, receiver, args) => {
+    //             let receiver = self.get_value(receiver);
+    //             let args = self.get_values(args);
+    //             let r = receiver.receive_message(SelectorSet::get(selector), args);
+    //             r
+    //         }
+    //         Operation::Block(b) => {
+    //             let r = Rc::new(BlockContext::new(
+    //                 CodeAddress(*b, 0),
+    //                 method_context.clone(),
+    //             ));
+    //             r
+    //         }
+    //         Operation::Global(_) => todo!(),
+    //         Operation::Char(v) => Rc::new(IntReceiver::new(*v as isize)),
+    //         Operation::String(v) => Rc::new(StringReceiver::new(v.clone())),
+    //         Operation::Arg(_) => todo!(),
+    //         Operation::Return(_) => todo!(),
+    //         Operation::Param(_) => todo!(),
+    //         Operation::Myself => todo!(),
+    //     };
+    //     {
+    //         let mut ip = self.ip.try_lock().unwrap();
+    //         self.values.try_lock().unwrap().insert(*ip, v);
+    //         // if step + 1 < self.method.blocks[block].opcode.len() {
+    //         *ip = CodeAddress(block, step + 1);
+    //         // }
+    //     }
+    // }
 
-    fn result(&self) -> Option<CodeAddress> {
-        self.result
-    }
-}
-
-#[derive(Debug)]
-pub struct CompiledMethod {
-    blocks: Vec<ByteCode>,
-    stack: Vec<CodeAddress>,
-    current_block: usize,
-    names: Vec<(String, CodeAddress)>,
-}
-
-pub struct Frame {
-    ip: CodeAddress,
-    stack: Vec<CodeAddress>,
-    done: bool,
-    method: Rc<CompiledMethod>,
-    values: BTreeMap<CodeAddress, Rc<dyn Receiver>>,
-}
-
-impl Frame {
-    pub fn new(method: Rc<CompiledMethod>) -> Self {
-        Self {
-            ip: CodeAddress(0, 0),
-            stack: vec![],
-            done: false,
-            method,
-            values: BTreeMap::new(),
-        }
-    }
-
-    pub fn run(&mut self) -> Rc<dyn Receiver> {
-        while !self.done {
-            self.process_step();
-        }
-        match self.method.blocks[0].result {
-            Some(result_addr) => match self.values.get(&result_addr) {
-                Some(v) => v.clone(),
-                None => panic!("value {} undefined.", result_addr),
-            },
-            None => todo!(),
-        }
-    }
-
-    fn process_step(&mut self) {
-        let CodeAddress(block, step) = self.ip;
-        let op = &self.method.blocks[block].opcode[step];
-        println!("{:?}", op);
-        let v: Rc<dyn Receiver> = match op {
-            Operation::Int(v) => Rc::new(IntReceiver::new(*v)),
-            Operation::Str(v) => todo!(),
-            Operation::Invoke(selector, receiver, args) => {
-                let receiver = self.get_value(receiver);
-                let args = self.get_values(args);
-                let r = receiver.receive_message(SelectorSet::get(selector), args);
-                r
-            }
-            Operation::Block(b) => {
-                let r = Rc::new(CompiledBlockReceiver::new(
-                    CodeAddress(*b, 0),
-                    self.clone(),
-                ));
-                r
-            }
-            Operation::Global(_) => todo!(),
-            Operation::Char(v) => Rc::new(IntReceiver::new(*v as isize)),
-            Operation::String(v) => Rc::new(StringReceiver::new(v.clone())),
-            Operation::Arg(v) => todo!(),
-            Operation::Return(_) => todo!(),
-            Operation::Param(_) => todo!(),
-            Operation::Myself => todo!(),
-        };
-        self.values.insert(self.ip, v);
-
-        if step + 1 < self.method.blocks[block].opcode.len() {
-            self.ip = CodeAddress(block, step + 1);
-        } else {
-            self.done = true;
-        }
+    fn result(&self, idx: usize) -> Rc<dyn Receiver> {
+        // match self.method.blocks[idx].result {
+        //     Some(addr) => self.get_value(&addr),
+        //     None => NilReciever::get(),
+        // }
+        todo!()
     }
 
     fn get_values(&self, args: &Vec<CodeAddress>) -> Vec<Rc<dyn Receiver>> {
+        let values = self.values.try_lock().unwrap();
         args.iter()
-            .map(|x| self.values.get(x).unwrap().clone())
+            .map(|x| values.get(x).unwrap().clone())
             .collect::<Vec<_>>()
     }
 
     fn get_value(&self, receiver: &CodeAddress) -> Rc<dyn Receiver> {
-        self.values.get(receiver).unwrap().clone()
-    }
-}
-
-impl Display for CompiledMethod {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{:15}", "Compiled Method:")?;
-        for block_idx in 0..self.blocks.len() {
-            writeln!(f, "---")?;
-            let b = &self.blocks[block_idx];
-            match b.result() {
-                Some(addr) => writeln!(f, "{:15} {}", format!("Block {}", block_idx), addr)?,
-                None => writeln!(f, "{:15}", format!("Block {}", block_idx))?,
-            }
-            for idx in 0..b.opcode.len() {
-                let addr = CodeAddress(block_idx, idx);
-                let name = {
-                    match self.names.iter().find(|x| x.1 == addr) {
-                        Some((k, _)) => k.as_str(),
-                        None => "",
-                    }
-                };
-                writeln!(f, "{:15} {} = {:?}", name, addr, b.opcode[idx])?
-            }
-        }
-        Ok(())
-    }
-}
-
-impl CompiledMethod {
-    pub fn new() -> Self {
-        Self {
-            current_block: 0,
-            blocks: vec![ByteCode::new()],
-            stack: vec![],
-            names: vec![],
-        }
+        let values = self.values.try_lock().unwrap();
+        values.get(receiver).unwrap().clone()
     }
 
-    pub fn define(&mut self, name: String, idx: CodeAddress) {
-        self.names.push((name, idx));
-    }
-
-    fn idx_for(&self, name: &str) -> Option<CodeAddress> {
-        let r = self.names.iter().find(|x| x.0 == name);
-        match r {
-            Some((_, v)) => Some(*v),
-            None => None,
-        }
-    }
-
-    pub fn compile(&mut self, ast: &AST) -> CodeAddress {
-        match ast {
-            AST::Int(v) => self.push(Operation::Int(*v)),
-            AST::Char(v) => self.push(Operation::Char(*v)),
-            AST::String(v) => self.push(Operation::String(v.to_string())),
-            AST::Block { params, body, .. } => {
-                let old_block = self.current_block;
-                self.current_block = self.blocks.len();
-                self.blocks.push(ByteCode::new());
-
-                for param_idx in 0..params.len() {
-                    let idx = self.push(Operation::Arg(param_idx));
-                    self.define(params[param_idx].to_string(), idx);
-                }
-                self.compile(body);
-                let block = Operation::Block(self.current_block);
-                if let Some(addr) = self.stack.pop() {
-                    let block = &mut self.blocks[self.current_block];
-                    block.set_result(addr);
-                }
-
-                self.current_block = old_block;
-                let result_idx = self.push(block);
-                result_idx
-            }
-            AST::Return(x) => {
-                let idx = self.compile(x);
-                self.push(Operation::Return(idx))
-            }
-            AST::Statements(s) => {
-                let mut n = CodeAddress(0, 0);
-                for stmt in s {
-                    n = self.compile(stmt);
-                }
-                n
-            }
-            AST::InvokeSequence(a, b) => {
-                let mut n = self.compile(a);
-                self.stack.push(n);
-                for x in b {
-                    n = self.compile(x);
-                    self.stack.push(n);
-                }
-                self.blocks[self.current_block].result = Some(n);
-                n
-            }
-            AST::Message { name, args } => {
-                if let Some(receiver_idx) = self.stack.pop() {
-                    let mut argv = vec![];
-
-                    for x in args {
-                        let n = self.compile(x);
-                        argv.push(n);
-                    }
-                    let c = Operation::Invoke(name.to_string(), receiver_idx, argv);
-                    self.push(c)
-                } else {
-                    panic!()
-                }
-            }
-            AST::Variable(name) => match self.idx_for(*name) {
-                Some(idx) => idx,
-                None => {
-                    let idx = self.push(Operation::Global(name.to_string()));
-                    self.define(name.to_string(), idx);
-                    idx
-                }
-            },
-            AST::Assign(namet, v) => {
-                if let AST::Name(name) = **namet {
-                    let idx = self.compile(v);
-                    self.define(name.to_string(), idx);
-                    idx
-                } else {
-                    panic!()
-                }
-            }
-            _ => todo!(),
-        }
-    }
-
-    pub fn push(&mut self, op: Operation) -> CodeAddress {
-        let b = &mut self.blocks[self.current_block];
-        CodeAddress(self.current_block, b.push(op))
-    }
-}
-
-impl Default for CompiledMethod {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct CompiledBlockReceiver {
-    start: CodeAddress,
-    meth: Rc<Frame>,
-}
-
-impl CompiledBlockReceiver {
-    pub fn new(start: CodeAddress, meth: Rc<Frame>) -> Self {
-        Self { start, meth }
-    }
-}
-
-impl Receiver for CompiledBlockReceiver {
-    fn receive_message(
-        &self,
-        selector: &'static str,
-        args: Vec<Rc<dyn Receiver>>,
-    ) -> Rc<dyn Receiver> {
-        match selector {
-            s => todo!("doesn't understand {}", s)
-        }
-    }
-
-    fn as_int(&self) -> Option<isize> {
+    fn done(&self) -> bool {
+        // let CodeAddress(block, idx) = self.instruction_pointer.try_lock().unwrap().clone();
+        // let blk = &self.method.blocks[block];
+        // blk.opcode.len() <= idx
         todo!()
     }
 
-    fn as_str(&self) -> Option<&'static str> {
-        todo!()
+    fn set_ip(&self, start: CodeAddress) -> CodeAddress {
+        // let mut ip = self.ip.try_lock().unwrap();
+        // let r = ip.clone();
+        // *ip = start;
+        // r
+        CodeAddress(0, 0)
     }
 }
 
-pub fn compile_script(input_string: String) -> Result<CompiledMethod, Box<dyn std::error::Error>> {
-    let parse_trees = parse_script(input_string)?;
-    let mut o = CompiledMethod::new();
-    for t in parse_trees {
-        let ast = t.as_abstract_syntax_tree();
-        println!("-> {}", t.to_string());
-        println!("-> {:#?}", &ast);
-        o.compile(&ast);
+impl BlockContext {
+    pub fn new(ctx: ContextRef) -> Rc<Self> {
+        let r = Self {
+            // start: CodeAddress(0, 0),
+            parent: ctx,
+            // params: Mutex::new(vec![]),
+        };
+        let rr = Rc::new(r);
+        rr
     }
-    Ok(o)
 }
 
 pub fn parse_method(
@@ -435,11 +367,6 @@ pub fn parse_script(
     Ok(parse_trees)
 }
 
-struct Context {
-    receiver_names: Mutex<BTreeMap<&'static str, Rc<dyn Receiver>>>,
-    myself: Rc<dyn Receiver>,
-}
-
 #[allow(dead_code)]
 impl Context {
     fn new(myself: Rc<dyn Receiver>) -> Self {
@@ -449,13 +376,13 @@ impl Context {
         }
     }
 
-    fn set_receiver(&self, name: &'static str, rec: Rc<dyn Receiver>) {
-        let mut map = self.receiver_names.lock().unwrap();
+    pub fn set_receiver(&self, name: &'static str, rec: Rc<dyn Receiver>) {
+        let mut map = self.receiver_names.try_lock().unwrap();
         map.insert(name, rec);
     }
 
-    fn get_receiver(&self, name: &'static str) -> Option<Rc<dyn Receiver>> {
-        let map = self.receiver_names.lock().unwrap();
+    pub fn get_receiver(&self, name: &'static str) -> Option<Rc<dyn Receiver>> {
+        let map = self.receiver_names.try_lock().unwrap();
         match map.get(name) {
             Some(r) => Some(r.clone()),
             None => None,
@@ -522,7 +449,8 @@ impl Context {
             AST::PatternPart(_, _, _) => todo!(),
             AST::List(_, _) => todo!(),
             AST::Table(t) => {
-                panic!("eval {:?}", t);
+                let v: Vec<Rc<dyn Receiver>> = t.iter().map(|x| self.eval_to_reciever(x)).collect();
+                Rc::new(ArrayReceiver(v))
             }
             AST::Message { name: _, args: _ } => todo!(),
             AST::Variable(name) => {
@@ -532,6 +460,7 @@ impl Context {
                     match *name {
                         "self" => self.myself.clone(),
                         "Point" => Rc::new(PointMetaReceiver),
+                        "Integer" => Rc::new(IntMetaReceiver),
                         _ => todo!("name not known: {}", name),
                     }
                 }
@@ -579,14 +508,14 @@ impl Context {
             } => {
                 info!("instantiate block");
                 let r = BlockReceiver::new(self.myself.clone(), params, temps, body.clone());
-                let map = self.receiver_names.lock().unwrap();
+                let map = self.receiver_names.try_lock().unwrap();
                 for (k, v) in map.iter() {
                     info!("push {} to block context", *k);
                     r.define(*k, v.clone());
                 }
                 Rc::new(r)
             }
-            AST::Char(c) => Rc::new(IntReceiver::new(*c as isize)),
+            AST::Char(c) => Rc::new(CharReceiver::new(*c)),
             _ => todo!("{:?}", t),
         }
     }
