@@ -56,18 +56,11 @@ struct AppError {
 pub struct MethodContext(Arc<FrameData>);
 
 pub struct BlockContext {
-    // start: CodeAddress,
     parent: ContextRef,
-    // params: Mutex<Vec<Rc<dyn Receiver>>>,
 }
-
-// pub struct Frame(Mutex<FrameData>);
 
 pub struct FrameData {
     instruction_pointer: Mutex<CodeAddress>,
-    // stack: Vec<CodeAddress>,
-    // done: bool,
-    // method: Rc<CompiledMethod>,
     values: Mutex<BTreeMap<CodeAddress, Rc<dyn Receiver>>>,
 }
 

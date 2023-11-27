@@ -7,3 +7,5 @@ exit
 q
 quit
 exit
+Hallo was denn noch so alle zussdf
+exit

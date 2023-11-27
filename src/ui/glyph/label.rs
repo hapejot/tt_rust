@@ -15,11 +15,11 @@ pub struct Label {
 }
 
 impl Label {
-    pub fn new(name: String, txt: String) -> Self {
+    pub fn new<T:ToString, U:ToString>(name: T, txt: U) -> Self {
         Self {
             area: Rect::new(),
-            name,
-            txt,
+            name: name.to_string(),
+            txt: txt.to_string(),
         }
     }
 }

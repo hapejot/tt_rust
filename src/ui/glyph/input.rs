@@ -19,13 +19,13 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn new(name: String, txt: String) -> Self {
+    pub fn new<T:ToString, U:ToString>(name: T, txt: U) -> Self {
         Self {
             active: false,
             pos: 0,
             area: Rect::new(),
-            txt: txt.chars().collect(),
-            name,
+            txt: txt.to_string().chars().collect(),
+            name: name.to_string(),
         }
     }
 }

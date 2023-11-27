@@ -315,19 +315,19 @@ async fn main() -> Result<()> {
     let w = &mut (Box::new(stdout()) as Box<dyn Write>);
 
     let mut p = Box::new(Panel::new());
-    let label = Label::new("1".to_string(), "Formular".to_string());
+    let label = Label::new("1", "Formular");
     p.add(Box::new(label));
-    p.add(Box::new(Label::new("2".to_string(), "Command".to_string())));
-    p.add(Box::new(Input::new("cmd".to_string(), String::new())));
-    p.add(Box::new(Label::new("3".to_string(), "Value 1".to_string())));
-    p.add(Box::new(Input::new("v1".to_string(), String::new())));
-    p.add(Box::new(Label::new("4".to_string(), "Value 2".to_string())));
-    p.add(Box::new(Input::new("v2".to_string(), String::new())));
-    p.add(Box::new(Label::new("5".to_string(), "Value 3".to_string())));
-    p.add(Box::new(Input::new("v3".to_string(), String::new())));
+    p.add(Box::new(Label::new("2", "Command")));
+    p.add(Box::new(Input::new("cmd", String::new())));
+    p.add(Box::new(Label::new("3", "Value 1")));
+    p.add(Box::new(Input::new("v1", String::new())));
+    p.add(Box::new(Label::new("4", "Value 2")));
+    p.add(Box::new(Input::new("v2", String::new())));
+    p.add(Box::new(Label::new("5", "Value 3")));
+    p.add(Box::new(Input::new("v3", String::new())));
     let mut data = AppData::new(Box::new(Frame::new(p)));
 
-    data.values = vec![("cmd".to_string(), "Peter".to_string())];
+    data.values = vec![("cmd".into(), "Peter".into())];
 
     data = event_loop(w, data).await;
 
