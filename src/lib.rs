@@ -31,6 +31,7 @@ pub mod parser;
 pub mod runtime;
 pub mod tsort;
 pub mod ui;
+pub mod agent;
 
 pub static TRACING: Lazy<bool> = Lazy::new(init_tracing);
 
