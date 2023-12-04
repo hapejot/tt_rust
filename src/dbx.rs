@@ -287,7 +287,7 @@ impl DBTable {
                 datatype: r.get(2).unwrap(),
                 default: r.get(4).unwrap(),
                 key: 0 < r.get(5).unwrap(),
-                has_null: 0 == r.get(3).unwrap(),
+                has_null: 0 == r.get::<usize,i64>(3).unwrap(),
             };
             self.fields.push(db_field);
         }

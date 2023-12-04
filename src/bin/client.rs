@@ -1,17 +1,23 @@
+use std::io::{read_to_string, stdin};
+
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
-    signal,
+    net::TcpStream,
 };
-use tracing::error;
-use tracing::info;
-use tt_rust::agent::protocol::{system, Coordinator, Message};
+use tracing::level_filters::LevelFilter;
+use tt_rust::{
+    agent::protocol::Message,
+    init_tracing,
+};
 
 #[tokio::main]
 async fn main() {
+    init_tracing("client", LevelFilter::INFO);
+    let s = read_to_string(stdin()).unwrap();
+
     let mut socket = TcpStream::connect("localhost:7778").await.unwrap();
 
-    let msg = Message::RequireSpace(10000);
+    let msg = Message::Load(s);
     let buf = serde_xdr::to_bytes(&msg).unwrap();
     socket.write_all(&buf[..]).await.unwrap();
 

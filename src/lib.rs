@@ -18,7 +18,7 @@ use santiago::{
     parser::{parse, ParseError, Tree},
 };
 use std::{path::Path, sync::Mutex};
-use tracing::info;
+use tracing::{info, level_filters::LevelFilter};
 
 use once_cell::sync::Lazy;
 
@@ -33,17 +33,16 @@ pub mod tsort;
 pub mod ui;
 pub mod agent;
 
-pub static TRACING: Lazy<bool> = Lazy::new(init_tracing);
+pub static TRACING: Lazy<bool> = Lazy::new(|| init_tracing("test", LevelFilter::INFO));
 
-pub fn init_tracing() -> bool {
-    use tracing_subscriber::filter::LevelFilter;
-    // let n = format!("test-{}.log", chrono::Utc::now());
-    let path = Path::new("tracing.log");
+pub fn init_tracing(name:&str, max_level: LevelFilter) -> bool {
+    let n = format!("{}-{}.log", name, chrono::Utc::now().format("%Y-%m-%dT%H%M%S"));
+    let path = Path::new(n.as_str());
     let log_file = std::fs::File::create(path).unwrap();
     let subscriber = tracing_subscriber::fmt()
         .with_writer(Mutex::new(log_file))
         .with_ansi(false)
-        .with_max_level(LevelFilter::TRACE)
+        .with_max_level(max_level)
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
     true

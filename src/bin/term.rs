@@ -35,14 +35,14 @@ use crossterm::{
         disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
         LeaveAlternateScreen, SetTitle,
     },
-    QueueableCommand, Result,
+    QueueableCommand
 };
 
 /// Prints a rectangular box.
 /// # let printer = Printer::new((6,4), &t, &*b);
 /// printer.print_box((0, 0), (6, 4), false);
 ///
-pub fn print_box(w: &mut Box<dyn Write>) -> Result<()> {
+pub fn print_box(w: &mut Box<dyn Write>) -> Result<(),std::io::Error> {
     w.write("\r\n".as_bytes())?;
     w.write("┌".as_bytes())?;
     w.write("─".as_bytes())?;
@@ -147,11 +147,7 @@ async fn event_loop(w: &mut Box<dyn Write>, _d: AppData) -> AppData {
                         x = column;
                         y = row;
                     }
-                    crossterm::event::MouseEventKind::Up(_) => {}
-                    crossterm::event::MouseEventKind::Drag(_) => {}
-                    crossterm::event::MouseEventKind::Moved => {}
-                    crossterm::event::MouseEventKind::ScrollDown => {}
-                    crossterm::event::MouseEventKind::ScrollUp => {}
+                    _ => {}
                 },
                 r => match f.handle_term_event(r) {
                     Ok(c) => {
@@ -298,7 +294,7 @@ impl AppData {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), std::io::Error> {
     use tracing_subscriber::filter::LevelFilter;
     let log_file = std::fs::File::create("term.log")?;
     let subscriber = tracing_subscriber::fmt()
