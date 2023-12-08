@@ -1,12 +1,12 @@
 use crossterm::execute;
 use serde_derive::{Deserialize, Serialize};
-use std::{cmp::Ordering, io::stdout, net::Ipv4Addr, sync::Mutex};
+use std::{cmp::Ordering, collections::BTreeMap, io::stdout, net::Ipv4Addr, sync::Mutex};
 use sysinfo::{DiskExt, System, SystemExt};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
 };
-use tracing::{info, error};
+use tracing::{error, info};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
@@ -17,7 +17,7 @@ pub enum Message {
     HasSpace(String, usize),
     Load(String),
     LoadHere(String, String),
-    Status(String),
+    Status(String, String),
 }
 
 pub struct Coordinator {
@@ -25,6 +25,7 @@ pub struct Coordinator {
     hostname: String,
     known_hosts: Mutex<Vec<String>>,
     monitor: Mutex<Option<tokio::sync::mpsc::Sender<Message>>>,
+    jobs: Mutex<BTreeMap<String, String>>,
 }
 
 impl Coordinator {
@@ -42,13 +43,14 @@ impl Coordinator {
             hostname,
             known_hosts: Mutex::new(vec![]),
             monitor: Mutex::new(None),
+            jobs: Mutex::new(BTreeMap::<String, String>::new()),
         }
     }
 
     pub async fn hello(&self) {
-        self.broadcast(&Message::Hello(self.hostname.clone()));
+        info!("sending hello");
+        self.broadcast(&Message::Hello(self.hostname.clone())).await;
     }
-
 
     pub async fn broadcast(&self, msg: &Message) {
         let mbuf = serde_xdr::to_bytes(msg).unwrap();
@@ -61,7 +63,7 @@ impl Coordinator {
 
     pub async fn receive(&self) -> Message {
         let mut buf = [0; 1024];
-        let (len, addr) = self.socket.recv_from(&mut buf).await.unwrap();
+        let (len, _addr) = self.socket.recv_from(&mut buf).await.unwrap();
         // println!("{:?} bytes received from {:?}", len, addr);
         let msg: Message = serde_xdr::from_bytes(&buf[..len]).unwrap();
 
@@ -100,9 +102,16 @@ impl Coordinator {
             info!("monitor waiting for message");
             if let Some(msg) = b.recv().await {
                 match msg {
-                    Message::Status(status) => {
-                        execute!(f, crossterm::cursor::MoveTo(1, 10)).unwrap();
-                        write!(f, "Status: {}", status).unwrap();
+                    Message::Status(jobid, status) => {
+                        let mut jobs = self.jobs.try_lock().unwrap();
+                        jobs.insert(jobid, status);
+                        let mut idx = 10;
+                        for (k, v) in jobs.iter() {
+                            execute!(f, crossterm::cursor::MoveTo(1, idx)).unwrap();
+                            execute!(f, crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)).unwrap();
+                            write!(f, "{} -> {}", k, v).unwrap();
+                            idx += 1;
+                        }
                     }
                     _ => {}
                 }
@@ -122,18 +131,17 @@ impl Coordinator {
 
                     if !known_hosts.iter().any(|y| x == *y) {
                         known_hosts.push(x);
-                        self.hello();
+                        self.hello().await;
                     }
                     if let Some(s) = &sender {
                         s.send(Message::Empty).await.unwrap();
                     }
                 }
-                Message::Status(status) => {
+                Message::Status(jobid, status) => {
                     info!("received status: {}", status);
                     if let Some(s) = &sender {
-                        s.send(Message::Status(status)).await.unwrap();
-                    }
-                    else {
+                        s.send(Message::Status(jobid, status)).await.unwrap();
+                    } else {
                         error!("no monitor attached.");
                     }
                 }

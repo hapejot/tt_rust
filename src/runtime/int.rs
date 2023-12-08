@@ -4,7 +4,6 @@ use std::rc::Rc;
 use super::{
     boo::{FalseReceiver, TrueReceiver},
     pnt::PointReceiver,
-    sel::SelectorSet,
     str::StringReceiver,
     Receiver,
 };

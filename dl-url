@@ -1,0 +1,8 @@
+read url
+echo "-> $url"
+cat <<EOF | target/debug/client
+fetch("$url", {
+  "headers": {
+  },
+});
+EOF

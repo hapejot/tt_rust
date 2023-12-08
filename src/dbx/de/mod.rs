@@ -1,5 +1,6 @@
 use serde::de::DeserializeOwned;
 use derow::Deserializer;
+
 mod derow;
 
 
@@ -47,7 +48,7 @@ mod testing {
         );
     }
 
-    fn statement_stream() -> Result<Vec<Person>, Box<dyn error::Error>> {
+    fn statement_stream() -> Result<Vec<Person>, Box<dyn std::error::Error>> {
         use rusqlite::*;
         let conn = setup_data();
         let mut stmt = conn.prepare("SELECT id, name, data FROM person where name = :name")?;

@@ -18,17 +18,20 @@ use crate::{
     BlockContext, ContextRef,
 };
 
+#[allow(dead_code)]
 struct MethodCache {
     cache: Mutex<BTreeMap<String, &'static CompiledMethod>>,
 }
 
 impl MethodCache {
+    #[allow(dead_code)]
     pub fn add(name: &str, meth: CompiledMethod) {
         let mut c = METHOD_CACHE.cache.try_lock().unwrap();
 
         c.insert(name.into(), Box::leak(Box::new(meth)));
     }
 
+    #[allow(dead_code)]
     pub fn get(name: &str) -> &'static CompiledMethod {
         let c = METHOD_CACHE.cache.try_lock().unwrap();
         c.get(name).unwrap()

@@ -198,14 +198,17 @@ impl MethodContext {
         ctx
     }
 
+    #[allow(dead_code)]
     fn done(&self) -> bool {
         (*self.0).done()
     }
 
+    #[allow(dead_code)]
     fn set_ip(&self, start: CodeAddress) -> CodeAddress {
         (*self.0).set_ip(start)
     }
 
+    #[allow(dead_code)]
     fn result(&self, idx: usize) -> Rc<dyn Receiver> {
         self.0.result(idx)
     }
@@ -276,7 +279,7 @@ impl FrameData {
     //     }
     // }
 
-    fn result(&self, idx: usize) -> Rc<dyn Receiver> {
+    fn result(&self, _idx: usize) -> Rc<dyn Receiver> {
         // match self.method.blocks[idx].result {
         //     Some(addr) => self.get_value(&addr),
         //     None => NilReciever::get(),
@@ -284,6 +287,7 @@ impl FrameData {
         todo!()
     }
 
+    #[allow(dead_code)]
     fn get_values(&self, args: &Vec<CodeAddress>) -> Vec<Rc<dyn Receiver>> {
         let values = self.values.try_lock().unwrap();
         args.iter()
@@ -291,6 +295,7 @@ impl FrameData {
             .collect::<Vec<_>>()
     }
 
+    #[allow(dead_code)]
     fn get_value(&self, receiver: &CodeAddress) -> Rc<dyn Receiver> {
         let values = self.values.try_lock().unwrap();
         values.get(receiver).unwrap().clone()
@@ -303,7 +308,7 @@ impl FrameData {
         todo!()
     }
 
-    fn set_ip(&self, start: CodeAddress) -> CodeAddress {
+    fn set_ip(&self, _start: CodeAddress) -> CodeAddress {
         // let mut ip = self.ip.try_lock().unwrap();
         // let r = ip.clone();
         // *ip = start;

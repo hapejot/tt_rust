@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let environment = Environment::new()?;
 
     // Connect using a DSN. Alternatively we could have used a connection string
-    let connection = environment.connect("app_server", "sa", "Kennwort01")?;
+    let connection = environment.connect("app_server", "sa", "Kennwort01", odbc_api::ConnectionOptions::default())?;
 
     // Execute a one of query without any parameters.
     match connection.execute("SELECT * FROM t01", ())? {
