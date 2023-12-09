@@ -9,9 +9,9 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    init_tracing("agentfs", LevelFilter::INFO);
+    init_tracing("agentfs", LevelFilter::TRACE);
 
-    let mut options = vec![MountOption::RW, MountOption::FSName("hello".to_string())];
+    let mut options = vec![MountOption::RW, MountOption::FSName("agent".to_string())];
     options.push(MountOption::AutoUnmount);
     options.push(MountOption::AllowRoot);
     fuser::mount2(AgentFS::new(), args.mount_point, &options).unwrap();
