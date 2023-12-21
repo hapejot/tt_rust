@@ -3,3 +3,5 @@ test.db
 *.log
 *.mp4
 fetch*txt
+tmp
+*.sqlite

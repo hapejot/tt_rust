@@ -1,15 +1,18 @@
-use serde::de::DeserializeOwned;
 use derow::Deserializer;
+use serde::de::DeserializeOwned;
 
 mod derow;
-
-
 
 pub fn from_row<T>(row: &rusqlite::Row) -> crate::error::Result<T>
 where
     T: DeserializeOwned,
 {
-	let columns = row.as_ref().column_names().iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let columns = row
+        .as_ref()
+        .column_names()
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>();
 
     let de = Deserializer::from_row(row, &columns);
     let r = T::deserialize(de);
@@ -42,7 +45,7 @@ mod testing {
             vec![Person {
                 id: 1,
                 name: Some("Steven".to_string()),
-                data: Some(vec![1,2,3]),
+                data: Some(vec![1, 2, 3]),
             }],
             r
         );
@@ -93,7 +96,7 @@ mod testing {
         .unwrap();
         conn.execute(
             "INSERT INTO person (name, data) VALUES (?1, ?2)",
-            ("Steven", vec![1,2,3]),
+            ("Steven", vec![1, 2, 3]),
         )
         .unwrap();
         conn

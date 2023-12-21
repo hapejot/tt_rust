@@ -1,9 +1,10 @@
 use crate::error::Error;
 use rusqlite::types::{FromSql, Value};
 use serde::{
-    de::{IntoDeserializer, MapAccess},
+    de::{value::U32Deserializer, EnumAccess, IntoDeserializer, MapAccess, VariantAccess},
     forward_to_deserialize_any,
 };
+use tracing::trace;
 
 pub struct Deserializer<'row, 'stmt, 'cols> {
     idx: Option<usize>,
@@ -34,8 +35,10 @@ impl<'row, 'stmt, 'cols> Deserializer<'row, 'stmt, 'cols> {
 impl<'de> serde::Deserializer<'de> for Deserializer<'de, '_, '_> {
     forward_to_deserialize_any! {
         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-        bytes byte_buf  unit unit_struct newtype_struct seq tuple
-        tuple_struct   enum identifier ignored_any
+        bytes byte_buf    newtype_struct seq tuple
+        tuple_struct   identifier ignored_any
+
+        unit unit_struct
     }
 
     type Error = Error;
@@ -44,7 +47,9 @@ impl<'de> serde::Deserializer<'de> for Deserializer<'de, '_, '_> {
     where
         V: serde::de::Visitor<'de>,
     {
-        match self.value() {
+        let v = self.value();
+        trace!("deserialize any {:?}", &v);
+        match v {
             Ok(Value::Null) => visitor.visit_none(),
             Ok(Value::Integer(v)) => visitor.visit_i64(v),
             Ok(Value::Real(v)) => visitor.visit_f64(v),
@@ -75,13 +80,86 @@ impl<'de> serde::Deserializer<'de> for Deserializer<'de, '_, '_> {
 
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: serde::de::Visitor<'de> {
-            match self.value() {
-                Ok(Value::Null) => visitor.visit_none(),
-                Ok(_) => visitor.visit_some(self),
-                Err(_) => todo!(),
-            }
+        V: serde::de::Visitor<'de>,
+    {
+        match self.value() {
+            Ok(Value::Null) => visitor.visit_none(),
+            Ok(_) => visitor.visit_some(self),
+            Err(_) => todo!(),
         }
+    }
+
+    fn deserialize_enum<V>(
+        self,
+        name: &'static str,
+        variants: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        let v = self.value();
+        trace!("deserialize enum {:?}", &v);
+        if let Ok(Value::Integer(n)) = v {
+            visitor.visit_enum(EnumValue(n))
+        } else {
+            panic!("result value is not integer... {:?}", v)
+        }
+    }
+}
+
+struct EnumValue(i64);
+
+impl<'de> VariantAccess<'de> for EnumValue {
+    type Error = Error;
+
+    fn unit_variant(self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value, Self::Error>
+    where
+        T: serde::de::DeserializeSeed<'de>,
+    {
+        todo!()
+    }
+
+    fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        todo!()
+    }
+
+    fn struct_variant<V>(
+        self,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        todo!()
+    }
+}
+
+impl<'de> EnumAccess<'de> for EnumValue {
+    type Error = Error;
+
+    type Variant = Self;
+
+    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
+    where
+        V: serde::de::DeserializeSeed<'de>,
+    {
+        let variant_code_deserializer: U32Deserializer<Self::Error> =
+            U32Deserializer::new(self.0 as u32);
+
+        let value = seed
+            .deserialize(variant_code_deserializer)?;
+
+        Ok((value, self))
+    }
 }
 
 struct RowMapAccess<'row, 'stmt, 'cols> {

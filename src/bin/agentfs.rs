@@ -9,7 +9,7 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    init_tracing("agentfs", LevelFilter::TRACE);
+    init_tracing("agentfs", LevelFilter::DEBUG);
 
     let mut options = vec![MountOption::RW, MountOption::FSName("agent".to_string())];
     options.push(MountOption::AutoUnmount);

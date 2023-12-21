@@ -1,34 +1,116 @@
 use bytebuffer::ByteBuffer;
 use fuser::{
-    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request,
+    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
 };
 use libc::ENOENT;
+use serde_derive::{Deserialize, Serialize};
+use serde_yaml::Index;
+use sha3::digest::generic_array::GenericArray;
+use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::cmp::min;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 
+use std::fs::File;
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::os::unix::fs::FileExt;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
-struct BytesContent(ByteBuffer);
+use crate::agent::fs::file::FileContent;
+use crate::agent::protocol::Message;
+use crate::data::model::{DataModel, Table};
+use crate::data::{Query, WhereCondition, WhereExpr};
+use crate::dbx::{Database, DatabaseBuilder};
 
-impl BytesContent {
-    pub fn new_from_str(val: &str) -> Self {
-        let mut bb = ByteBuffer::new();
-        bb.write_string(val);
-        BytesContent(bb)
+use self::memory::BytesContent;
+
+pub enum FSError {
+    Fail,
+}
+
+pub mod file;
+pub mod memory;
+
+pub trait ReadingContent {
+    fn len(&self) -> u64;
+
+    fn read(&mut self, offset: i64, size: u32) -> ByteBuffer;
+}
+
+pub trait WritingContent {
+    fn write(&mut self, offset: i64, size: u32, data: ByteBuffer) -> u32;
+    fn flush(&mut self);
+}
+
+pub trait Content: ReadingContent + WritingContent {}
+
+pub trait ContentProvider {
+    fn get_read(&self, id: i64) -> Result<Box<dyn ReadingContent>, FSError>;
+}
+
+struct StatusFile {
+    status: Mutex<Option<ByteBuffer>>,
+}
+
+impl StatusFile {
+    fn new() -> Self {
+        Self {
+            status: Mutex::new(None),
+        }
+    }
+}
+
+fn load_status() -> Option<ByteBuffer> {
+    if let Ok(mut socket) = TcpStream::connect("localhost:7778") {
+        let msg = Message::ReadStatus;
+        let buf = serde_xdr::to_bytes(&msg).unwrap();
+
+        socket.write(&buf[..]).unwrap();
+
+        let mut buf = [0; 30000];
+        let n = socket.read(&mut buf).unwrap();
+        assert!(n > 0);
+        let msg: Message = serde_xdr::from_bytes(&buf[..n]).unwrap();
+        let s = serde_yaml::to_string(&msg).unwrap();
+        let mut buf = ByteBuffer::new();
+        buf.write_string(s.as_str());
+        Some(buf)
+    } else {
+        None
+    }
+}
+
+impl ReadingContent for StatusFile {
+    fn len(&self) -> u64 {
+        let mut status = self.status.try_lock().unwrap();
+        if *status == None {
+            *status = load_status();
+        }
+        if let Some(st) = &*status {
+            st.len() as u64
+        } else {
+            error!("status could not be loaded.");
+            0
+        }
     }
 
-    pub fn len(&self) -> u64 {
-        self.0.len() as u64
-    }
-
-    pub fn read(&self, offset: i64, size: u32) -> &[u8] {
-        let buf = &self.0;
-        let from = offset as usize;
-        let to = min(offset as usize + size as usize, buf.len());
-        &buf.as_bytes()[from..to]
+    fn read(&mut self, offset: i64, size: u32) -> ByteBuffer {
+        let mut status = self.status.try_lock().unwrap();
+        if *status == None {
+            *status = load_status();
+        }
+        if let Some(st) = &*status {
+            let from = offset as usize;
+            let to = min(offset as usize + size as usize, st.len());
+            ByteBuffer::from_bytes(&st.as_bytes()[from..to])
+        } else {
+            error!("status could not be loaded.");
+            ByteBuffer::new()
+        }
     }
 }
 
@@ -51,26 +133,91 @@ pub struct AgentFS {
     next_inode: u64,
     inodes: BTreeMap<u64, FileAttr>,
     dirs: BTreeMap<u64, Dir>,
-    content: BTreeMap<u64, BytesContent>,
+    content: BTreeMap<u64, Box<dyn Content>>,
+    db: Database,
+    files: [Option<Box<dyn Content>>; 10],
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename = "entry")]
+struct DirEntry {
+    dir: u64,
+    name: String,
+    inode: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum NodeType {
+    Dir,
+    File,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename = "inode")]
+struct INode {
+    id: u64,
+    #[serde(rename = "type")]
+    kind: NodeType,
+    size: usize,
+}
+
+fn prepare_database_object() -> Database {
+    let model = DataModel::new("fs")
+        .table(
+            Table::new("dir")
+                .field("id", true, "int")
+                .field("type", false, "string")
+                .field("flags", false, "string"),
+        )
+        .table(
+            Table::new("entry")
+                .field("dir", true, "int")
+                .field("name", true, "string")
+                .field("inode", false, "int"),
+        )
+        .table(
+            Table::new("inode")
+                .field("id", true, "int")
+                .field("type", false, "int")
+                .field("size", false, "int"),
+        );
+
+    let builder = DatabaseBuilder::new();
+    let db = builder.build();
+    db.connect(Some("filesystem.sqlite"));
+    db.activate_structure(model);
+    db
 }
 
 impl AgentFS {
     pub fn new() -> Self {
         let inodes = BTreeMap::new();
         let dirs = BTreeMap::new();
-        let next_inode = 1;
+        let mut next_inode = 1;
         let content = BTreeMap::new();
+        let db = prepare_database_object();
+        let id_result = db.execute_query("select count(*), max(id) from inode");
+        let x = &id_result[0];
+        let y = x.get_at(0);
+        let z = x.get_at(1);
+        if u64::from(y.clone()) > 0 {
+            next_inode = z.clone().into();
+        }
         let mut r = Self {
             inodes,
             dirs,
             next_inode,
             content,
+            db,
+            files: [None, None, None, None, None, None, None, None, None, None],
         };
-        let root_dir = r.create_dir();
-        let c = BytesContent::new_from_str("Das ist ein übler Test.\n");
-        let status_file = r.create_file(c);
-        let root_dir = r.dirs.get_mut(&root_dir).unwrap();
-        root_dir.insert("test".to_string().into(), status_file);
+        // let root_dir = r.create_dir();
+        // let c = BytesContent::new_from_str("Das ist ein übler Test.\n");
+        // let test_file = r.create_file(Box::new(c));
+        // let status_file = r.create_file(Box::new(StatusFile::new()));
+        // let root_dir = r.dirs.get_mut(&root_dir).unwrap();
+        // root_dir.insert("test".to_string().into(), test_file);
+        // root_dir.insert("status".to_string().into(), status_file);
         r
     }
 
@@ -78,23 +225,7 @@ impl AgentFS {
         let inodes = &mut self.inodes;
         let ino = self.next_inode;
         self.next_inode += 1;
-        let attr = FileAttr {
-            ino,
-            size: 0,
-            blocks: 0,
-            atime: SystemTime::now(),
-            mtime: SystemTime::now(),
-            ctime: SystemTime::now(),
-            crtime: SystemTime::now(),
-            kind: FileType::RegularFile,
-            perm: 0o755,
-            nlink: 2,
-            uid: 1000,
-            gid: 1000,
-            rdev: 0,
-            flags: 0,
-            blksize: 512,
-        };
+        let attr = as_file_attr(ino);
         inodes.insert(ino, attr);
         ino
     }
@@ -103,23 +234,7 @@ impl AgentFS {
         let inodes = &mut self.inodes;
         let ino = self.next_inode;
         self.next_inode += 1;
-        let attr = FileAttr {
-            ino,
-            size: 0,
-            blocks: 0,
-            atime: UNIX_EPOCH, // 1970-01-01 00:00:00
-            mtime: UNIX_EPOCH,
-            ctime: UNIX_EPOCH,
-            crtime: UNIX_EPOCH,
-            kind: FileType::Directory,
-            perm: 0o755,
-            nlink: 2,
-            uid: 1000,
-            gid: 1000,
-            rdev: 0,
-            flags: 0,
-            blksize: 512,
-        };
+        let attr = as_dir_attr(ino);
 
         inodes.insert(ino, attr);
         ino
@@ -132,7 +247,7 @@ impl AgentFS {
         ino
     }
 
-    fn create_file(&mut self, c: BytesContent) -> u64 {
+    fn create_file(&mut self, c: Box<dyn Content>) -> u64 {
         let ino = self.create_file_inode();
         let n = c.len();
         self.content.insert(ino, c);
@@ -140,6 +255,127 @@ impl AgentFS {
         attr.size = n;
         ino
     }
+
+    fn load_attr(&self, ino: u64) -> Option<FileAttr> {
+        let q = Query::new(
+            "inode",
+            vec!["*"],
+            WhereCondition::new().and(WhereExpr::Equals("id".into(), ino.into())),
+        );
+        if let Some(d) = self.db.select::<INode>(q).first() {
+            info!("load attr -> {:?}", d);
+            match d.kind {
+                NodeType::Dir => Some(as_dir_attr(ino)),
+                NodeType::File => Some(as_file_attr(ino)),
+            }
+        } else {
+            warn!("no attribute loaded for inode {}", ino);
+            None
+        }
+    }
+
+    fn create_inode(&mut self, kind: NodeType) -> u64 {
+        self.next_inode += 1;
+        let n = INode {
+            id: self.next_inode,
+            kind,
+            size: 0,
+        };
+        self.db
+            .modify_from_ser(&n)
+            .map_err(|x| panic!("create inode to sqlite failed with: {x}"))
+            .unwrap();
+        n.id
+    }
+
+    fn db_lookup(&self, parent: u64, unwrap: &str) -> Option<FileAttr> {
+        let q = Query::new(
+            "entry",
+            vec!["dir", "name", "inode"],
+            WhereCondition::new()
+                .and(WhereExpr::Equals("dir".into(), parent.into()))
+                .and(WhereExpr::Equals("name".into(), unwrap.into())),
+        );
+        if let Some(d) = self.db.select::<DirEntry>(q).first() {
+            self.load_attr(d.inode)
+        } else {
+            None
+        }
+    }
+
+    fn get_dir_entry(&mut self, parent: u64, name: &OsStr) -> DirEntry {
+        let name_str = name.to_str().unwrap();
+        let q = Query::new(
+            "entry",
+            vec!["dir", "name", "inode"],
+            WhereCondition::new()
+                .and(WhereExpr::Equals("dir".into(), parent.into()))
+                .and(WhereExpr::Equals(
+                    "name".into(),
+                    name.to_str().unwrap().into(),
+                )),
+        );
+        if let Some(r) = self.db.select::<DirEntry>(q).first() {
+            self.inodes.insert(r.inode, as_dir_attr(r.inode));
+            r.clone()
+        } else {
+            let d = self.create_file_inode();
+            let dir = DirEntry {
+                dir: parent,
+                name: name.to_str().unwrap().to_string(),
+                inode: d,
+            };
+            self.db.modify_from_ser(&dir).unwrap();
+            dir
+        }
+    }
+
+    fn put_dir_entry(&mut self, dir: u64, name: String, inode: u64) {
+        let dir = DirEntry { dir, name, inode };
+        self.db.modify_from_ser(&dir).unwrap();
+    }
+}
+
+fn as_dir_attr(ino: u64) -> FileAttr {
+    let attr = FileAttr {
+        ino,
+        size: 0,
+        blocks: 0,
+        atime: SystemTime::now(),
+        mtime: SystemTime::now(),
+        ctime: SystemTime::now(),
+        crtime: SystemTime::now(),
+        kind: FileType::Directory,
+        perm: 0o755,
+        nlink: 2,
+        uid: 1000,
+        gid: 1000,
+        rdev: 0,
+        flags: 0,
+        blksize: 512,
+    };
+    attr
+}
+
+fn as_file_attr(ino: u64) -> FileAttr {
+    let attr = FileAttr {
+        ino,
+        size: 10,
+        blocks: 0,
+        atime: SystemTime::now(),
+        mtime: SystemTime::now(),
+        ctime: SystemTime::now(),
+        crtime: SystemTime::now(),
+        kind: FileType::RegularFile,
+        perm: 0o755,
+        nlink: 1,
+        uid: 1000,
+        gid: 1000,
+        rdev: 0,
+        flags: 0,
+        blksize: 512,
+    };
+    attr
 }
 
 impl Filesystem for AgentFS {
@@ -150,9 +386,16 @@ impl Filesystem for AgentFS {
             reply.attr(&ttl, x);
             info!("returned attributes {:?}", x);
         } else {
-            warn!("not found getattr(ino: {:#x?})", ino);
-            reply.error(ENOENT);
-            error!("not found");
+            if let Some(attr) = self.load_attr(ino) {
+                let ttl = get_ttl();
+                reply.attr(&ttl, &attr);
+                info!("returned attributes {:?}", &attr);
+            } else {
+                warn!("not found getattr(ino: {:#x?})", ino);
+
+                reply.error(ENOENT);
+                error!("not found");
+            }
         }
     }
 
@@ -164,26 +407,64 @@ impl Filesystem for AgentFS {
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        info!("readdir {ino}");
-        if let Some(dir) = self.dirs.get(&ino) {
-            if offset == 0 {
-                let _ = reply.add(ino, 1, FileType::Directory, ".");
-                let _ = reply.add(ino, 2, FileType::Directory, "..");
-                let mut idx = offset + 3;
-                for (entry, node) in dir.entries.iter().skip(offset as usize) {
-                    if let Some(attr) = self.inodes.get(node) {
-                        if !reply.add(*node, idx, attr.kind, entry.to_str().unwrap()) {
-                            break;
-                        }
-                        idx += 1;
-                    }
-                }
+        info!("readdir {ino} offset:{}", offset);
+
+        let q = Query::new(
+            "entry",
+            vec!["dir", "name", "inode"],
+            WhereCondition::new().and(WhereExpr::Equals("dir".into(), ino.into())),
+        );
+        let mut d: Vec<DirEntry> = self.db.select(q);
+        d.insert(
+            0,
+            DirEntry {
+                dir: ino,
+                name: "..".into(),
+                inode: ino,
+            },
+        );
+        d.insert(
+            0,
+            DirEntry {
+                dir: ino,
+                name: ".".into(),
+                inode: ino,
+            },
+        );
+        for idx in (offset as usize)..d.len() {
+            let entry = &d[idx];
+            if reply.add(
+                entry.inode,
+                1 + idx as i64,
+                FileType::RegularFile,
+                entry.name.clone(),
+            ) {
+                info!("break loop");
+                break;
             }
-            reply.ok();
-        } else {
-            warn!("readdir(ino: {:#x?}) failed", ino);
-            reply.error(ENOENT);
         }
+        reply.ok();
+        // if let Some(dir) = self.dirs.get(&ino) {
+        //     if offset == 0 {
+        //         let _ = reply.add(ino, 1, FileType::Directory, ".");
+        //         let _ = reply.add(ino, 2, FileType::Directory, "..");
+        //         let mut idx = offset + 3;
+        //         for (entry, node) in dir.entries.iter().skip(offset as usize) {
+        //             if let Some(attr) = self.inodes.get(node) {
+        //                 info!("entry {:?}", entry);
+        //                 if !reply.add(*node, idx, attr.kind, entry.to_str().unwrap()) {
+        //                     info!("break loop");
+        //                     break;
+        //                 }
+        //                 idx += 1;
+        //             }
+        //         }
+        //     }
+        //     reply.ok();
+        // } else {
+        //     warn!("readdir(ino: {:#x?}) failed", ino);
+        //     reply.error(ENOENT);
+        // }
     }
 
     fn init(
@@ -198,17 +479,22 @@ impl Filesystem for AgentFS {
     fn destroy(&mut self) {}
 
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        if let Some(d) = self.dirs.get(&parent) {
-            if let Some(e) = d.entries.get(name) {
-                if let Some(attr) = self.inodes.get(e) {
-                    reply.entry(&get_ttl(), attr, 0);
-                } else {
-                    error!("inode {e} referred to by {name:?} was not found.");
-                    reply.error(libc::ENOENT);
-                }
-            } else {
-                reply.error(libc::ENOENT);
-            }
+        info!("lookup {} {:?}", parent, name.to_str());
+        // if let Some(d) = self.dirs.get(&parent) {
+        //     if let Some(e) = d.entries.get(name) {
+        //         if let Some(attr) = self.inodes.get(e) {
+        //             reply.entry(&get_ttl(), attr, 0);
+        //         } else {
+        //             error!("inode {e} referred to by {name:?} was not found.");
+        //             reply.error(libc::ENOENT);
+        //         }
+        //     } else {
+        //         reply.error(libc::ENOENT);
+        //     }
+        // } else {
+        if let Some(attr) = self.db_lookup(parent, name.to_str().unwrap()) {
+            reply.entry(&get_ttl(), &attr, 0);
+            debug!("-> attributes = {:?}", &attr);
         } else {
             error!("directory with inode {parent} doesn't exist.");
             reply.error(libc::ENOENT);
@@ -225,22 +511,46 @@ impl Filesystem for AgentFS {
         uid: Option<u32>,
         gid: Option<u32>,
         size: Option<u64>,
-        _atime: Option<fuser::TimeOrNow>,
-        _mtime: Option<fuser::TimeOrNow>,
-        _ctime: Option<std::time::SystemTime>,
+        atime: Option<fuser::TimeOrNow>,
+        mtime: Option<fuser::TimeOrNow>,
+        ctime: Option<std::time::SystemTime>,
         fh: Option<u64>,
-        _crtime: Option<std::time::SystemTime>,
-        _chgtime: Option<std::time::SystemTime>,
+        crtime: Option<std::time::SystemTime>,
+        chgtime: Option<std::time::SystemTime>,
         _bkuptime: Option<std::time::SystemTime>,
         flags: Option<u32>,
         reply: ReplyAttr,
     ) {
+        let _ = chgtime;
+        let _ = crtime;
+        let _ = ctime;
+        let _ = mtime;
+        let _ = atime;
         debug!(
             "[Not Implemented] setattr(ino: {:#x?}, mode: {:?}, uid: {:?}, \\
             gid: {:?}, size: {:?}, fh: {:?}, flags: {:?})",
             ino, mode, uid, gid, size, fh, flags
         );
-        reply.error(libc::ENOSYS);
+        reply.attr(
+            &get_ttl(),
+            &FileAttr {
+                ino,
+                size: size.unwrap_or(10),
+                blocks: 1,
+                atime: SystemTime::now(),
+                mtime: SystemTime::now(),
+                ctime: SystemTime::now(),
+                crtime: SystemTime::now(),
+                kind: FileType::RegularFile,
+                perm: 0x655,
+                nlink: 1,
+                uid: uid.unwrap_or(1000),
+                gid: gid.unwrap_or(1000),
+                rdev: 1,
+                blksize: 512,
+                flags: flags.unwrap_or(0),
+            },
+        );
     }
 
     fn readlink(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyData) {
@@ -275,11 +585,17 @@ impl Filesystem for AgentFS {
         umask: u32,
         reply: ReplyEntry,
     ) {
-        debug!(
-            "[Not Implemented] mkdir(parent: {:#x?}, name: {:?}, mode: {}, umask: {:#x?})",
-            parent, name, mode, umask
-        );
-        reply.error(libc::ENOSYS);
+        let d = self.create_dir_inode();
+        let dir = DirEntry {
+            dir: parent,
+            name: name.to_str().unwrap().to_string(),
+            inode: d,
+        };
+        self.next_inode += 1;
+        self.db.modify_from_ser(&dir).unwrap();
+        let attr = self.inodes[&d];
+        let generation = 0;
+        reply.entry(&get_ttl(), &attr, generation)
     }
 
     fn unlink(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: fuser::ReplyEmpty) {
@@ -346,25 +662,47 @@ impl Filesystem for AgentFS {
         reply.error(libc::EPERM);
     }
 
-    fn open(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: fuser::ReplyOpen) {
-        reply.opened(0, 0);
+    fn open(&mut self, _req: &Request<'_>, ino: u64, _flags: i32, reply: fuser::ReplyOpen) {
+        info!("open {} {:X}", ino, _flags);
+        let mut opt = File::options();
+        let f = _flags & 0xfff;
+        if f == libc::O_RDONLY || f == libc::O_RDWR {
+            opt.read(true);
+        }
+        if f == libc::O_WRONLY || f == libc::O_RDWR {
+            opt.write(true);
+        }
+        if f == libc::O_APPEND {
+            opt.append(true);
+        }
+
+        if let Ok(f) = opt.open(format!("tmp/inode-{}", ino)) {
+            assert!(self.files[0].is_none());
+            self.files[0] = Some(Box::new(FileContent::new(format!("tmp/inode-{}", ino))));
+            reply.opened(0, 0);
+        } else {
+            reply.error(libc::ENOSYS);
+        }
     }
 
     fn read(
         &mut self,
         _req: &Request<'_>,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: i64,
         size: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        if let Some(c) = self.content.get(&ino) {
-            reply.data(c.read(offset, size));
+        info!("reading {} bytes...", size);
+        if let Some(cc) = &mut self.files[fh as usize] {
+            let buf = cc.read(offset, size);
+            info!("reading content returned {} bytes...", buf.len());
+            reply.data(buf.as_bytes());
         } else {
-            reply.error(libc::ENOENT);
+            panic!("invalid file handle");
         }
     }
 
@@ -380,8 +718,8 @@ impl Filesystem for AgentFS {
         lock_owner: Option<u64>,
         reply: fuser::ReplyWrite,
     ) {
-        debug!(
-            "[Not Implemented] write(ino: {:#x?}, fh: {}, offset: {}, data.len(): {}, \\
+        info!(
+            "write(ino: {:#x?}, fh: {}, offset: {}, data.len(): {}, \\
             write_flags: {:#x?}, flags: {:#x?}, lock_owner: {:?})",
             ino,
             fh,
@@ -391,7 +729,15 @@ impl Filesystem for AgentFS {
             flags,
             lock_owner
         );
-        reply.error(libc::ENOSYS);
+        if let Some(cc) = &mut self.files[fh as usize] {
+            let mut bb = ByteBuffer::new();
+            bb.write(data);
+            let n = cc.write(offset, data.len() as u32, bb);
+            debug!("written {} bytes", n);
+            reply.written(n as u32);
+        } else {
+            panic!("invalid handle");
+        }
     }
 
     fn flush(
@@ -403,10 +749,15 @@ impl Filesystem for AgentFS {
         reply: fuser::ReplyEmpty,
     ) {
         debug!(
-            "[Not Implemented] flush(ino: {:#x?}, fh: {}, lock_owner: {:?})",
+            "flush(ino: {:#x?}, fh: {}, lock_owner: {:?})",
             ino, fh, lock_owner
         );
-        reply.error(libc::ENOSYS);
+        if let Some(cc) = &mut self.files[fh as usize] {
+            cc.flush();
+            reply.ok();
+        } else {
+            panic!("invalid handle");
+        }
     }
 
     fn release(
@@ -483,7 +834,8 @@ impl Filesystem for AgentFS {
     }
 
     fn statfs(&mut self, _req: &Request<'_>, _ino: u64, reply: fuser::ReplyStatfs) {
-        reply.statfs(0, 0, 0, 0, 0, 512, 255, 0);
+        debug!("statfs {_ino}");
+        reply.statfs(100, 100, 100, 10, 10, 512, 255, 100);
     }
 
     fn setxattr(
@@ -556,12 +908,24 @@ impl Filesystem for AgentFS {
         flags: i32,
         reply: fuser::ReplyCreate,
     ) {
-        debug!(
-            "[Not Implemented] create(parent: {:#x?}, name: {:?}, mode: {}, umask: {:#x?}, \\
-            flags: {:#x?})",
-            parent, name, mode, umask, flags
+        info!(
+            "create {} Mode:{:o} umask:{:o} flags:{:b}",
+            name.to_str().unwrap(),
+            mode,
+            umask,
+            flags
         );
-        reply.error(libc::ENOSYS);
+
+        // the assumption is, that this is called only when there is no previous entry.
+        // so why call it here?
+        let ino = self.create_inode(NodeType::File);
+
+        let attr = self.load_attr(ino).unwrap();
+        let generation = 0;
+        self.files[0] = Some(Box::new(FileContent::new(format!("tmp/inode-{}", ino))));
+        self.put_dir_entry(parent, name.to_str().unwrap().to_string(), ino);
+        reply.created(&get_ttl(), &attr, generation, 42, 0);
+        info!("created: {:?}", &attr);
     }
 
     fn getlk(

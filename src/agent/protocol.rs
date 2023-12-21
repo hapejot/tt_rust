@@ -9,6 +9,11 @@ use tokio::{
 use tracing::{error, info};
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct AgentStatusInfo {
+    name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
     Empty,
     Hello(String),
@@ -18,6 +23,8 @@ pub enum Message {
     Load(String),
     LoadHere(String, String),
     Status(String, String),
+    ReadStatus,
+    StatusResponse { agents: Vec<AgentStatusInfo> },
 }
 
 pub struct Coordinator {
@@ -108,7 +115,13 @@ impl Coordinator {
                         let mut idx = 10;
                         for (k, v) in jobs.iter() {
                             execute!(f, crossterm::cursor::MoveTo(1, idx)).unwrap();
-                            execute!(f, crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)).unwrap();
+                            execute!(
+                                f,
+                                crossterm::terminal::Clear(
+                                    crossterm::terminal::ClearType::CurrentLine
+                                )
+                            )
+                            .unwrap();
                             write!(f, "{} -> {}", k, v).unwrap();
                             idx += 1;
                         }
@@ -177,6 +190,15 @@ impl Coordinator {
         });
         let (host, size) = results[0];
         (size, String::from(host))
+    }
+
+    pub fn get_agent_infos(&self) -> Vec<AgentStatusInfo> {
+        self.known_hosts
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|x| AgentStatusInfo { name: x.clone() })
+            .collect()
     }
 }
 

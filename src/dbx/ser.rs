@@ -22,8 +22,6 @@ where
 }
 
 mod element {
-    use std::fmt::Display;
-    use tracing::{info, trace};
     use crate::{
         data::model::meta::{
             Meta,
@@ -31,6 +29,8 @@ mod element {
         },
         dbx::{DBRow, SqlValue},
     };
+    use std::fmt::Display;
+    use tracing::{info, trace};
 
     pub enum SerElement {
         Empty,
@@ -806,11 +806,13 @@ impl ser::Serializer for SQLValueSerializer {
 
     fn serialize_unit_variant(
         self,
-        _name: &'static str,
-        _variant_index: u32,
+        name: &'static str,
+        variant_index: u32,
         variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        Ok(SerElement::Value(SqlValue::new(variant)))
+        let _ = variant;
+        let _ = name;
+        Ok(SerElement::Value(SqlValue::new(variant_index)))
     }
 
     fn serialize_newtype_struct<T: ?Sized>(
@@ -1228,8 +1230,6 @@ mod testing {
         TRACING,
     };
 
-    
-    
     use serde_derive::Serialize;
     use tracing::info;
 

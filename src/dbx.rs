@@ -1,11 +1,11 @@
-#[allow(dead_code)]
-use std::fmt::Write;
 use rusqlite::{
     ffi::Error,
     types::{ToSqlOutput, Value},
     Connection, ErrorCode, ToSql,
 };
 use serde::{de::DeserializeOwned, Serialize};
+#[allow(dead_code)]
+use std::fmt::Write;
 use std::{
     fmt::Display,
     rc::Rc,
@@ -16,7 +16,6 @@ pub mod de;
 pub mod ser;
 
 use crate::data::model::{DataModel, Table};
-
 
 use std::clone::Clone;
 #[derive(Debug, Clone)]
@@ -92,6 +91,16 @@ impl From<u64> for SqlValue {
     }
 }
 
+impl From<SqlValue> for u64 {
+    fn from(value: SqlValue) -> Self {
+        if let SqlValue(Value::Integer(n)) = value {
+            n as u64
+        } else {
+            panic!("no integer Value")
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct DBRow {
     table: Option<String>,
@@ -100,7 +109,7 @@ pub struct DBRow {
 
 #[allow(dead_code)]
 impl DBRow {
-    fn get(&self, k: &str) -> Option<&SqlValue> {
+    pub fn get(&self, k: &str) -> Option<&SqlValue> {
         if let (Some(tabname), Some(idx)) = (&self.table, k.find(".")) {
             let fld = &k[idx + 1..];
             let tab = &k[..idx];
@@ -167,15 +176,15 @@ impl DBRow {
         self.values.push((k.into(), v));
     }
 
-    fn get_at(&self, idx: usize) -> &SqlValue {
+    pub fn get_at(&self, idx: usize) -> &SqlValue {
         &self.values[idx].1
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.values.len()
     }
 
-    fn key_at(&self, idx: usize) -> &str {
+    pub fn key_at(&self, idx: usize) -> &str {
         self.values[idx].0.as_str()
     }
 
@@ -287,7 +296,7 @@ impl DBTable {
                 datatype: r.get(2).unwrap(),
                 default: r.get(4).unwrap(),
                 key: 0 < r.get(5).unwrap(),
-                has_null: 0 == r.get::<usize,i64>(3).unwrap(),
+                has_null: 0 == r.get::<usize, i64>(3).unwrap(),
             };
             self.fields.push(db_field);
         }
@@ -507,7 +516,10 @@ impl DatabaseImpl {
             assert!(key.len() > 0, "no keys found in {:?}", tab);
             let (sql_upd, params) = create_update_statement_from(table_name, &key, &row);
             trace!("sql upd: {}", sql_upd);
-            let mut stmt = con.prepare(sql_upd.as_str()).unwrap();
+            let mut stmt = match con.prepare(sql_upd.as_str()) {
+                Ok(stmt) => stmt,
+                Err(x) => panic!("prepare: [{}] -> {}", sql_upd, x),
+            };
             match stmt.execute(rusqlite::params_from_iter(params)) {
                 Ok(1) => {}
                 Ok(x) => {
@@ -543,7 +555,10 @@ impl DatabaseImpl {
             match sql_result {
                 Ok(mut rows) => {
                     while let Some(row) = rows.next().unwrap() {
-                        result.push(de::from_row(row).unwrap());
+                        result.push(
+                            de::from_row(row)
+                                .expect(format!("could not convert row {:?}", row).as_str()),
+                        );
                         // for c in 0..&stmt.column_count() {}
                     }
                 }

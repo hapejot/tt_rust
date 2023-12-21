@@ -20,7 +20,7 @@ use tokio::{io::AsyncWriteExt, net::TcpListener, signal};
 use tracing::info;
 use tracing::{error, level_filters::LevelFilter};
 use tt_rust::{
-    agent::protocol::{remote_call, Coordinator, Message},
+    agent::protocol::{remote_call, AgentStatusInfo, Coordinator, Message},
     init_tracing,
 };
 
@@ -55,7 +55,7 @@ impl Agent {
         }
     }
     #[allow(unused_assignments)]
-    pub async fn run(&self, lstnr: TcpListener) {
+    pub async fn run(&self, lstnr: TcpListener) -> ! {
         // let cfg = self.config.clone();
         loop {
             match lstnr.accept().await {
@@ -97,6 +97,12 @@ impl Agent {
                                 let buf = serde_xdr::to_bytes(&Message::Empty).unwrap();
                                 socket.write_all(&buf[..]).await.unwrap();
                                 Agent::new(coord, cfg).load_here(fetch).await
+                            }
+                            Message::ReadStatus => {
+                                let agents: Vec<AgentStatusInfo> = coord.get_agent_infos();
+                                let msg = Message::StatusResponse { agents };
+                                let buf = serde_xdr::to_bytes(&msg).unwrap();
+                                socket.write_all(&buf[..]).await.unwrap();
                             }
                             _ => todo!("{:?}", msg),
                         }
