@@ -3,7 +3,7 @@
 
 // use anyhow::Error;
 use odbc_api::{
-    buffers::{AnyBuffer, BufferDesc, ColumnarAnyBuffer, TextRowSet},
+    buffers::{BufferDesc, ColumnarAnyBuffer},
     Cursor, Environment, ResultSetMetadata,
 };
 use std::{error::Error, io::stdout};
