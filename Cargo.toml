@@ -34,9 +34,12 @@ bytebuffer = "2.2.0"
 sha3 = "0.10.8"
 waiter_di = { version = "1.6.5", features = ["async"], git = "https://github.com/hapejot/waiter.git" }
 config = { git = "https://github.com/hapejot/config-rs.git", version = "0.13.1" }
+clap = { version = "4.4.11", features = ["derive"] }
+
+
+[target.'cfg(unix)'.dependencies]
 libc = "0.2.150"
 fuser = "0.14.0"
-clap = { version = "4.4.11", features = ["derive"] }
 
 [dev-dependencies]
 serde_derive = "1.0"
