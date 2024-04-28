@@ -15,7 +15,7 @@ use std::{collections::BTreeMap, fs::File, io::Write, str::FromStr};
 use sysinfo::DiskExt;
 use sysinfo::System;
 use sysinfo::SystemExt;
-use tokio::io::AsyncReadExt;
+use tokio::{io::AsyncReadExt, net::TcpStream};
 use tokio::{io::AsyncWriteExt, net::TcpListener, signal};
 use tracing::info;
 use tracing::{error, level_filters::LevelFilter};
@@ -104,6 +104,10 @@ impl Agent {
                                 let buf = serde_xdr::to_bytes(&msg).unwrap();
                                 socket.write_all(&buf[..]).await.unwrap();
                             }
+                            Message::List(chg) => {
+                                let _ = chg;
+                                list_local_files(cfg, &mut socket).await;
+                            }
                             _ => todo!("{:?}", msg),
                         }
                     });
@@ -146,6 +150,24 @@ impl Agent {
                 .await;
         }
     }
+}
+
+async fn list_local_files(cfg: AgentConfig, socket: &mut TcpStream) {
+    let mut entries = vec![];
+    match std::fs::read_dir(cfg.download.path.clone()) {
+        Ok(d) => {
+            entries.push(cfg.download.path.clone());
+            for e in d {
+                if let Ok(ee) = e {
+                    entries.push(ee.file_name().to_str().unwrap().into());
+                }
+            }
+        }
+        Err(_) => todo!(),
+    }
+    let msg = Message::ListResult { entries };
+    let buf = serde_xdr::to_bytes(&msg).unwrap();
+    socket.write_all(&buf[..]).await.unwrap();
 }
 
 fn generate_hash(fetch: &String) -> String {

@@ -37,6 +37,16 @@ impl SqlValue {
     fn to_sql(&self) -> ToSqlOutput<'_> {
         self.0.to_sql().unwrap()
     }
+
+    fn is_null(&self) -> bool {
+        match &self.0 {
+            Value::Null => true,
+            Value::Integer(_) => false,
+            Value::Real(_) => false,
+            Value::Text(_) => false,
+            Value::Blob(_) => false,
+        }
+    }
 }
 
 impl Display for SqlValue {
@@ -539,7 +549,7 @@ impl DatabaseImpl {
                 panic!("connection not usable");
             }
             if let None = &self.table(table_name) {
-                panic!("table not available: {}", table_name);
+                warn!("table not available: {}", table_name);
             }
         }
     }
@@ -631,19 +641,21 @@ impl DatabaseImpl {
         if let Some(con) = &self.con {
             if let Some(m) = &self.model {
                 for t in m.tables() {
-                    info!("activate table {}", t.name());
-                    let dbtab = self.table(t.name());
-                    match dbtab {
-                        Some(dbtable) => {
-                            let srcs = build_alter_table(dbtable, t).unwrap();
-                            for src in srcs {
+                    if !t.is_transient() {
+                        info!("activate table {}", t.name());
+                        let dbtab = self.table(t.name());
+                        match dbtab {
+                            Some(dbtable) => {
+                                let srcs = build_alter_table(dbtable, t).unwrap();
+                                for src in srcs {
+                                    con.execute(src.as_str(), []).unwrap();
+                                }
+                            }
+                            None => {
+                                let src = build_create_table(t).unwrap();
+                                info!("{}", src);
                                 con.execute(src.as_str(), []).unwrap();
                             }
-                        }
-                        None => {
-                            let src = build_create_table(t).unwrap();
-                            info!("{}", src);
-                            con.execute(src.as_str(), []).unwrap();
                         }
                     }
                 }
@@ -669,10 +681,12 @@ fn create_update_statement_from<'a>(
     let mut sep = "";
     let mut params = vec![];
     for (k, v) in row.values.iter() {
-        let sqlv = v.to_sql();
-        write!(&mut sql, "{}{} = ?", sep, k).unwrap();
-        sep = ",";
-        params.push(sqlv);
+        if !v.is_null() {
+            let sqlv = v.to_sql();
+            write!(&mut sql, "{}{} = ?", sep, k).unwrap();
+            sep = ",";
+            params.push(sqlv);
+        }
     }
     write!(&mut sql, " WHERE ").unwrap();
     sep = "";

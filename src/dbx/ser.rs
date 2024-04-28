@@ -25,12 +25,12 @@ mod element {
     use crate::{
         data::model::meta::{
             Meta,
-            RelationKind::{Many, ManyMany, One},
+            RelationKind::{Embedded, Many, ManyMany, One},
         },
         dbx::{DBRow, SqlValue},
     };
     use std::fmt::Display;
-    use tracing::{info, trace};
+    use tracing::info;
 
     pub enum SerElement {
         Empty,
@@ -50,15 +50,17 @@ mod element {
                 (SerElement::Value(_), None) => todo!(),
                 (SerElement::Value(_), Some(_)) => todo!(),
                 (SerElement::Sequence(s), context) => {
+                    info!("with context");
                     for x in s {
                         let mut ss = x.as_rows(context, meta);
                         result.append(&mut ss);
                     }
                 }
                 (SerElement::Row(n, r), None) => {
-                    trace!("as rows Row {}", n);
+                    info!("as rows Row {}", n);
                     let mut rr = DBRow::new(n.as_str());
                     for (k, v) in r {
+                        info!("convert: {}", k);
                         match meta.get_relation(n.as_str(), k.as_str()) {
                             Some(r) => {
                                 info!("found relation {} {}", n, k);
@@ -97,6 +99,16 @@ mod element {
                                             meta,
                                             &mut result,
                                         );
+                                    }
+                                    Embedded => {
+                                        info!("embedded");
+                                        let x = v.as_rows(context, meta);
+                                        assert_eq!(x.len(), 1);
+                                        let x = &x[1];
+                                        for k in x.keys() {
+                                            info!("embed: {}", k);
+                                            rr.insert(k.into(), x.get(k).unwrap().clone());
+                                        }
                                     }
                                 }
                             }

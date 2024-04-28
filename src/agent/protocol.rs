@@ -25,6 +25,15 @@ pub enum Message {
     Status(String, String),
     ReadStatus,
     StatusResponse { agents: Vec<AgentStatusInfo> },
+
+    /// list all local files created or modified after given change number
+    List(usize),
+
+    /// list all files created or modified after given change number
+    ListAll(usize),
+
+    /// result list of all entries found.
+    ListResult{entries: Vec<String>},
 }
 
 pub struct Coordinator {

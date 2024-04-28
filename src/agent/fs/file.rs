@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{Read, Write}, os::unix::fs::FileExt,
+    io::Write, os::unix::fs::FileExt,
 };
 
 use bytebuffer::ByteBuffer;

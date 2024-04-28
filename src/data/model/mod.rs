@@ -1,4 +1,3 @@
-
 use self::meta::Meta;
 
 pub mod meta {
@@ -17,8 +16,9 @@ pub mod meta {
         One,
         Many,
         ManyMany(String),
+        Embedded,
     }
-    #[derive(Debug,Clone)]
+    #[derive(Debug, Clone)]
     pub struct Meta {
         relations: Vec<Relation>,
     }
@@ -69,7 +69,7 @@ pub mod meta {
     }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct DataModel {
     name: String,
     tables: Vec<Table>,
@@ -107,9 +107,10 @@ impl DataModel {
     }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Table {
     name: String,
+    transient: bool,
     fields: Vec<Field>,
 }
 
@@ -117,6 +118,15 @@ impl Table {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.into(),
+            transient: false,
+            fields: vec![],
+        }
+    }
+
+    pub fn new_transient(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            transient: true,
             fields: vec![],
         }
     }
@@ -144,9 +154,13 @@ impl Table {
             .filter(|x| x.key)
             .map(|x| x.name.as_str())
     }
+    
+    pub(crate) fn is_transient(&self) -> bool {
+        self.transient
+    }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Field {
     pub name: String,
     pub key: bool,

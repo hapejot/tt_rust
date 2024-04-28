@@ -9,7 +9,7 @@ use std::cmp::min;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 
-use std::fs::File;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
@@ -51,6 +51,7 @@ struct StatusFile {
 }
 
 impl StatusFile {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             status: Mutex::new(None),
@@ -123,6 +124,7 @@ impl Dir {
         Self { entries }
     }
 
+    #[allow(dead_code)]
     fn insert(&mut self, name: OsString, ino: u64) {
         self.entries.insert(name, ino);
     }
@@ -220,6 +222,7 @@ impl AgentFS {
         r
     }
 
+    #[allow(dead_code)]
     fn create_file_inode(&mut self, size: u64) -> u64 {
         let inodes = &mut self.inodes;
         let ino = self.next_inode;
@@ -239,6 +242,7 @@ impl AgentFS {
         ino
     }
 
+    #[allow(dead_code)]
     fn create_dir(&mut self) -> u64 {
         let ino = self.create_dir_inode();
         self.dirs.insert(ino, Dir::new());
@@ -246,6 +250,7 @@ impl AgentFS {
         ino
     }
 
+    #[allow(dead_code)]
     fn create_file(&mut self, c: Box<dyn Content>) -> u64 {
         let node = c.inode();
         let n = node.size as u64;
@@ -303,6 +308,7 @@ impl AgentFS {
         }
     }
 
+    #[allow(dead_code)]
     fn get_dir_entry(&mut self, parent: u64, name: &OsStr) -> DirEntry {
         let _name_str = name.to_str().unwrap();
         let q = Query::new(
@@ -730,7 +736,7 @@ impl Filesystem for AgentFS {
         );
         if let Some(cc) = &mut self.files[fh as usize] {
             let mut bb = ByteBuffer::new();
-            bb.write(data);
+            let _ = bb.write(data);
             let n = cc.write(offset, data.len() as u32, bb);
             debug!("written {} bytes", n);
             reply.written(n as u32);

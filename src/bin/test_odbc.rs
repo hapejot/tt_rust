@@ -10,7 +10,7 @@ use std::{error::Error, io::stdout};
 
 /// Maximum number of rows fetched with one row set. Fetching batches of rows is usually much
 /// faster than fetching individual rows.
-const BATCH_SIZE: usize = 5000;
+// const BATCH_SIZE: usize = 5000;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Write csv to standard out
