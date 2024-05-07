@@ -78,7 +78,7 @@ impl From<SqlValue> for String {
         if let Value::Text(s) = value.0 {
             s
         } else {
-            panic!("exctracting string value from a non-string.");
+            panic!("exctracting string value from a non-string. ({:?})", value.0);
         }
     }
 }
@@ -399,6 +399,11 @@ impl Database {
         x.execute_query(arg)
     }
 
+    pub fn execute_query_with_params(&self, arg: &str, params: Vec<SqlValue>) -> Vec<DBRow> {
+        let x = self.locked();
+        (*x).execute_query_with_params(arg, params)
+    }
+
     pub fn tables(&self) -> Vec<String> {
         let x = self.locked();
         x.tables.iter().map(|x| x.name.clone()).collect()
@@ -669,6 +674,38 @@ impl DatabaseImpl {
         let r = self.tables.iter().find(|x| x.name == table_name);
         r
     }
+
+    fn execute_query_with_params(&self, arg: &str, params: Vec<SqlValue>) -> Vec<DBRow> {
+        let mut result = vec![];
+        if let Some(con) = &self.con {
+            if let Ok(mut stmt) = con.prepare(arg) {
+                let ns = stmt
+                    .column_names()
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>();
+                match stmt.query(rusqlite::params_from_iter(params.iter())) {
+                    Ok(mut r) => {
+                        while let Ok(Some(row)) = r.next() {
+                            // println!("{:?}", row);
+                            let mut res_row = DBRow::new("#query");
+                            for k in ns.iter() {
+                                if let Ok(v) = row.get_ref(k.as_str()) {
+                                    res_row.insert(k.into(), SqlValue(Value::from(v)));
+                                }
+                            }
+                            //     let v = Value::from(row.get::<_, Value>(idx).unwrap());
+                            //     res_row.insert(names[idx].clone(), SqlValue(v));
+                            // }
+                            result.push(res_row);
+                        }
+                    }
+                    Err(_) => todo!(),
+                }
+            }
+        }
+        result
+    }
 }
 
 fn create_update_statement_from<'a>(
@@ -704,17 +741,21 @@ fn create_insert_statement_from<'a>(arg: &str, s: &'a DBRow) -> (String, Vec<ToS
     let mut sql = String::new();
     write!(&mut sql, "INSERT INTO {}(", arg).unwrap();
     let mut sep = "";
-    for (k, _) in s.values.iter() {
-        write!(&mut sql, "{}{}", sep, k).unwrap();
-        sep = ",";
+    for (k, v) in s.values.iter() {
+        if !v.is_null() {
+            write!(&mut sql, "{}{}", sep, k).unwrap();
+            sep = ",";
+        }
     }
     write!(&mut sql, ") VALUES (").unwrap();
     sep = "";
     let mut params = vec![];
     for (_k, v) in s.values.iter() {
-        write!(&mut sql, "{}?", sep).unwrap();
-        sep = ",";
-        params.push(v.to_sql());
+        if !v.is_null() {
+            write!(&mut sql, "{}?", sep).unwrap();
+            sep = ",";
+            params.push(v.to_sql());
+        }
     }
 
     write!(&mut sql, ")").unwrap();

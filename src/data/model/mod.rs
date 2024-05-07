@@ -16,7 +16,7 @@ pub mod meta {
         One,
         Many,
         ManyMany(String),
-        Embedded,
+        Embedded { prefix: Option<String> },
     }
     #[derive(Debug, Clone)]
     pub struct Meta {
@@ -154,7 +154,7 @@ impl Table {
             .filter(|x| x.key)
             .map(|x| x.name.as_str())
     }
-    
+
     pub(crate) fn is_transient(&self) -> bool {
         self.transient
     }
